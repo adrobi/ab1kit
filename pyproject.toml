@@ -22,7 +22,7 @@ ab1kit = "chrom_cli:main"
 
 [tool.setuptools]
 packages = ["chrom_core", "ui"]
-py-modules = ["chrom_cli"]
+py-modules = ["chrom_cli", "i18n", "translations_en"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
