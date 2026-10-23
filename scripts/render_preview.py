@@ -15,7 +15,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from chrom_core import read_ab1  # noqa: E402
-from ui.main_window import ChromatogramWidget  # noqa: E402
+from ui.chrom_view import ChromatogramWidget  # noqa: E402
 
 
 def main() -> None:
