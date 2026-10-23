@@ -171,3 +171,48 @@ class ChromatogramWidget(QWidget):
             painter.drawRect(int(x), q_bottom - bar_h, bar_w, bar_h)
             painter.setPen(BASE_COLORS.get(base.upper(), QColor("#404040")))
             painter.drawText(QPointF(x - 4, letter_y), base)
+
+
+class MainWindow(QMainWindow):
+    """Top-level ab1kit window: menu + status bar around the chromatogram."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setWindowTitle("ab1kit")
+        self.resize(1100, 700)
+        self.chrom_view = ChromatogramWidget()
+        self.setCentralWidget(self.chrom_view)
+
+        file_menu = self.menuBar().addMenu("&File")
+        open_action = QAction("&Open .ab1…", self)
+        open_action.setShortcut("Ctrl+O")
+        open_action.triggered.connect(self._open_file)
+        file_menu.addAction(open_action)
+        quit_action = QAction("E&xit", self)
+        quit_action.setShortcut("Ctrl+Q")
+        quit_action.triggered.connect(self.close)
+        file_menu.addAction(quit_action)
+
+    def _open_file(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open chromatogram",
+            "",
+            "Sanger chromatograms (*.ab1);;All files (*)",
+        )
+        if not path:
+            return
+        chrom = read_ab1(Path(path))
+        self.chrom_view.set_chromatogram(chrom)
+        self.setWindowTitle(f"ab1kit — {Path(path).name}")
+        n = len(chrom.seq)
+        mean_q = sum(chrom.quality) / max(n, 1)
+        self.statusBar().showMessage(f"{chrom.sample_id}: {n} bases, mean Q {mean_q:.1f}")
+
+
+def run(argv: list[str] | None = None) -> int:
+    """Application entry point used by the ``ab1kit`` console script."""
+    app = QApplication(argv if argv is not None else [])
+    window = MainWindow()
+    window.show()
+    return app.exec()
