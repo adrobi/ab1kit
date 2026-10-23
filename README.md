@@ -29,6 +29,17 @@ molecular biology lab work. English/Russian interface.
 Python 3.11+, PySide6 (Qt) GUI. Core logic is UI-independent and covered by
 pytest. MIT license.
 
+## Getting started
+
+Requires Python 3.11+:
+
+```
+python -m venv .venv
+.venv/Scripts/pip install -e ".[dev]"    # Windows; on POSIX: .venv/bin/pip
+.venv/Scripts/python -m pytest           # run the test suite
+.venv/Scripts/ab1kit                     # launch the GUI
+```
+
 ## Status
 
 Concept stage — the full concept and roadmap (in Russian) are in
