@@ -17,6 +17,7 @@ MAX_ZOOM = 64.0
 
 RULE_H = 20          # base-number ruler at the top
 LETTER_H = 24        # called-base letters below the traces
+REF_H = 18           # reference letters row (shown while a reference is loaded)
 Q_STRIP_H = 56       # per-base quality bars at the bottom
 
 
@@ -43,6 +44,7 @@ class ChromatogramWidget(QWidget):
         self.highlights: list[tuple[int, int]] = []  # base ranges, [start, end)
         self.edited: dict[int, str | None] = {}      # edited position -> original base
         self.trim_region: tuple[int, int] | None = None  # base range [start, end)
+        self.reference: tuple[str, dict[int, int]] | None = None  # letters + ref->read map
         self._hover_x: float | None = None
         self._drag_x: float | None = None
         self._press_x: float | None = None
@@ -61,10 +63,15 @@ class ChromatogramWidget(QWidget):
             self.zoom = 8.0
         self.highlights = []
         self.trim_region = None
+        self.reference = None
         self._avg_spacing = self._total_points() / max(1, len(chrom.seq))
         self.offset = self._clamp_offset(self.offset)
         self.update()
         self.view_changed.emit()
+
+    def set_reference(self, letters: str | None, ref_to_read: dict[int, int] | None = None) -> None:
+        self.reference = (letters, dict(ref_to_read)) if letters else None
+        self.update()
 
     def set_edited(self, edited: dict[int, str | None]) -> None:
         self.edited = dict(edited)
@@ -322,16 +329,41 @@ class ChromatogramWidget(QWidget):
             return
 
         trace_top = RULE_H + 2
-        trace_bottom = h - Q_STRIP_H - LETTER_H - 4
+        ref_rows = REF_H if self.reference else 0
+        trace_bottom = h - Q_STRIP_H - LETTER_H - ref_rows - 4
 
         self._paint_highlights(painter, w, h)
         self._paint_grid(painter, w, trace_top, trace_bottom)
         self._paint_ruler(painter, w)
         self._paint_traces(painter, w, trace_top, trace_bottom)
         self._paint_bases(painter, w, h)
+        self._paint_reference(painter, w, h)
         self._paint_trim(painter, w, h)
         self._paint_cursor(painter, h)
         painter.end()
+
+    def _paint_reference(self, painter: QPainter, w: int, h: int) -> None:
+        if not self.reference or not self.chrom:
+            return
+        letters, ref_to_read = self.reference
+        font = QFont(self.font())
+        font.setFamilies(["Consolas", "Courier New", "monospace"])
+        font.setPixelSize(13)
+        painter.setFont(font)
+        y = h - Q_STRIP_H - LETTER_H - 6
+        peaks = self.chrom.peak_indices
+        prev_x = -10.0
+        for ref_pos, read_idx in sorted(ref_to_read.items(), key=lambda kv: kv[1]):
+            x = self._x(peaks[read_idx])
+            if x < 0 or x > w or x - prev_x < 4:
+                continue
+            prev_x = x
+            letter = letters[ref_pos] if ref_pos < len(letters) else "?"
+            matches = letter.upper() == self.chrom.seq[read_idx].upper()
+            painter.setPen(
+                QColor(self.theme["dim"] if matches else self.theme["low_q"])
+            )
+            painter.drawText(QPointF(x - 3, y), letter)
 
     def _paint_trim(self, painter: QPainter, w: int, h: int) -> None:
         bounds = self._trim_boundaries()

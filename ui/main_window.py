@@ -24,6 +24,9 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollBar,
     QSpinBox,
+    QPlainTextEdit,
+    QTableWidget,
+    QTableWidgetItem,
     QToolBar,
     QVBoxLayout,
     QWidget,
@@ -31,6 +34,7 @@ from PySide6.QtWidgets import (
 
 from chrom_core import Chromatogram, EditableRead, batch, read_ab1, trim_window
 from chrom_core import export, sessions
+from chrom_core.align import ReadAlignment, align_read, gapped_sequences, parse_sequence
 from chrom_core.config import AppConfig, load_config, save_config
 from chrom_core.editing import INSERT_LETTERS, IUPAC_LETTERS
 from chrom_core.seqops import find_matches
@@ -146,6 +150,8 @@ class MainWindow(QMainWindow):
         self.read_model: EditableRead | None = None
         self.trim_dialog: TrimDialog | None = None
         self.batch_reports: list[batch.FileReport] = []
+        self.reference_seq: str = ""
+        self.alignment: ReadAlignment | None = None
         self._search_ranges: list[tuple[int, int]] = []
         self._search_pos = -1
 
@@ -166,6 +172,7 @@ class MainWindow(QMainWindow):
         self._build_toolbar()
         self._build_info_dock()
         self._build_batch_dock()
+        self._build_analysis_dock()
         self._build_menus()
         self._connect()
         self.setAcceptDrops(True)
@@ -300,6 +307,19 @@ class MainWindow(QMainWindow):
         self.batch_dock.visibilityChanged.connect(batch_action.setChecked)
         view_menu.addAction(batch_action)
 
+        analysis_menu = self.menuBar().addMenu(tr("menu.analysis"))
+        reference_action = QAction(tr("menu.analysis.reference"), self)
+        reference_action.setShortcut("Ctrl+L")
+        reference_action.triggered.connect(self._reference_dialog)
+        analysis_menu.addAction(reference_action)
+        clear_ref = QAction(tr("menu.analysis.clear_reference"), self)
+        clear_ref.triggered.connect(self._clear_reference)
+        analysis_menu.addAction(clear_ref)
+        analysis_menu.addSeparator()
+        export_aligned = QAction(tr("menu.analysis.export_aligned"), self)
+        export_aligned.triggered.connect(self._export_aligned)
+        analysis_menu.addAction(export_aligned)
+
         help_menu = self.menuBar().addMenu(tr("menu.help"))
         about_action = QAction(tr("menu.help.about"), self)
         about_action.triggered.connect(
@@ -322,6 +342,25 @@ class MainWindow(QMainWindow):
         self.batch_panel.open_requested.connect(self.open_path)
         self.batch_panel.export_button.clicked.connect(self._batch_export)
         self.batch_panel.csv_button.clicked.connect(self._batch_save_csv)
+
+    def _build_analysis_dock(self) -> None:
+        self.diff_dock = QDockWidget(tr("analysis.diffs.title"), self)
+        self.diff_table = QTableWidget(0, 5)
+        self.diff_table.setHorizontalHeaderLabels(
+            [
+                tr("analysis.col.pos"),
+                tr("analysis.col.kind"),
+                tr("analysis.col.ref"),
+                tr("analysis.col.read"),
+                tr("analysis.col.readpos"),
+            ]
+        )
+        self.diff_table.verticalHeader().setVisible(False)
+        self.diff_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.diff_table.setSortingEnabled(True)
+        self.diff_dock.setWidget(self.diff_table)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.diff_dock)
+        self.diff_dock.hide()
 
     def _connect(self) -> None:
         self.chrom_view.view_changed.connect(self._sync_from_view)
@@ -352,6 +391,8 @@ class MainWindow(QMainWindow):
         self._push_recent(str(self._path))
         self._refresh_info(model.current())
         self._sync_actions()
+        if self.reference_seq:
+            self._realign()
         n = len(model.seq)
         mean_q = sum(model.quality) / max(1, n)
         message = tr("status.file", n=n, q=mean_q)
@@ -381,6 +422,130 @@ class MainWindow(QMainWindow):
         )
         if path:
             self.open_path(path)
+
+    # --------------------------------------------------------------- analysis
+    def _reference_dialog(self) -> None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle(tr("analysis.ref.title"))
+        dialog.resize(480, 240)
+        layout = QVBoxLayout(dialog)
+        edit = QPlainTextEdit()
+        edit.setPlaceholderText(tr("analysis.ref.paste"))
+        layout.addWidget(edit)
+
+        def from_file() -> None:
+            path, _ = QFileDialog.getOpenFileName(
+                dialog, tr("analysis.ref.from_file"), "", "Sequence (*.fasta *.fa *.txt);;All files (*)"
+            )
+            if path:
+                edit.setPlainText(Path(path).read_text(encoding="utf-8", errors="replace"))
+
+        file_button = QPushButton(tr("analysis.ref.from_file"))
+        file_button.clicked.connect(from_file)
+        layout.addWidget(file_button)
+
+        ok = QPushButton("OK")
+        ok.clicked.connect(dialog.accept)
+        cancel = QPushButton(tr("dialog.close"))
+        cancel.clicked.connect(dialog.reject)
+        row = QWidget()
+        row_layout = QHBoxLayout(row)
+        row_layout.addWidget(ok)
+        row_layout.addWidget(cancel)
+        layout.addWidget(row)
+
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        try:
+            sequence = parse_sequence(edit.toPlainText())
+        except ValueError as exc:
+            QMessageBox.warning(self, tr("analysis.ref.title"), str(exc))
+            return
+        if not sequence:
+            return
+        self._set_reference_seq(sequence)
+
+    def _set_reference_seq(self, sequence: str) -> None:
+        self.reference_seq = sequence
+        if self.read_model is not None:
+            self._realign()
+        else:
+            self.statusBar().showMessage(tr("analysis.need_read"), 5000)
+
+    def _clear_reference(self) -> None:
+        self.reference_seq = ""
+        self.alignment = None
+        self.chrom_view.set_reference(None)
+        self.diff_table.setRowCount(0)
+        self.diff_dock.hide()
+
+    def _realign(self) -> None:
+        if not (self.read_model and self.reference_seq):
+            return
+        try:
+            self.alignment = align_read("".join(self.read_model.seq), self.reference_seq)
+        except ValueError as exc:
+            QMessageBox.warning(self, tr("analysis.ref.title"), str(exc))
+            self._clear_reference()
+            return
+        self.chrom_view.set_reference(self.reference_seq, self.alignment.ref_to_read)
+        self._fill_diff_table()
+        self.diff_dock.setVisible(bool(self.alignment.differences))
+        pct = f"{self.alignment.identity * 100:.1f}"
+        if self.alignment.differences:
+            message = tr(
+                "analysis.status",
+                n=len(self.alignment.differences),
+                pct=pct,
+                rstart=self.alignment.ref_start + 1,
+                rend=self.alignment.ref_end,
+            )
+        else:
+            message = tr("analysis.no_diffs")
+        if self.alignment.alternatives > 1:
+            message += " · " + tr("analysis.ambiguous", n=self.alignment.alternatives)
+        self.statusBar().showMessage(message, 8000)
+
+    def _fill_diff_table(self) -> None:
+        kind_labels = {
+            "substitution": tr("analysis.kind.substitution"),
+            "deletion": tr("analysis.kind.deletion"),
+            "insertion": tr("analysis.kind.insertion"),
+        }
+        diffs = self.alignment.differences if self.alignment else []
+        self.diff_table.setSortingEnabled(False)
+        self.diff_table.setRowCount(len(diffs))
+        for row, diff in enumerate(diffs):
+            values = [
+                diff.ref_pos + 1,
+                kind_labels.get(diff.kind, diff.kind),
+                diff.ref_base,
+                diff.read_base,
+                diff.read_pos + 1 if diff.read_pos is not None else "",
+            ]
+            for col, value in enumerate(values):
+                item = QTableWidgetItem()
+                item.setData(Qt.ItemDataRole.DisplayRole, value)
+                self.diff_table.setItem(row, col, item)
+        self.diff_table.setSortingEnabled(True)
+
+    def _export_aligned(self) -> None:
+        if not (self.alignment and self.reference_seq and self.read_model):
+            return
+        path = self._export_target(
+            tr("menu.analysis.export_aligned"), ".aligned.fasta", "FASTA (*.fasta)"
+        )
+        if not path:
+            return
+        ref_aligned, read_aligned = gapped_sequences(self.alignment, self.reference_seq)
+        sample = self._export_id()
+        strand = "reverse" if self.alignment.strand == "-" else "forward"
+        content = (
+            export.to_fasta(f"{sample}_reference[{self.alignment.ref_start + 1}-{self.alignment.ref_end}]", ref_aligned)
+            + export.to_fasta(f"{sample}_read_{strand}", read_aligned)
+        )
+        export.write_text(path, content)
+        self.statusBar().showMessage(tr("export.done", path=path), 5000)
 
     # ------------------------------------------------------------------ batch
     def _open_folder_dialog(self) -> None:
@@ -497,6 +662,8 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(
             f"ab1kit — {self._path.name}" + ("*" if self.read_model.modified else "")
         )
+        if self.reference_seq:
+            self._realign()
 
     def apply_base_change(self, index: int, base: str) -> None:
         if self.read_model:

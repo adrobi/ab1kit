@@ -173,6 +173,50 @@ def test_batch_panel_flow(qapp, monkeypatch, tmp_path):
 
 
 @pytest.mark.skipif(not AB1, reason="no example .ab1 files")
+def test_reference_alignment_flow(qapp, monkeypatch, tmp_path):
+    from chrom_core.config import AppConfig
+    from ui.main_window import MainWindow
+
+    sample = next(p for p in AB1 if "3730" in p.name)
+    window = MainWindow(AppConfig(recent_files=[]))
+    window.show()
+    assert window.open_path(sample)
+    seq = "".join(window.read_model.seq)
+    ref = list(seq[100:400])
+    ref[50] = "A" if ref[50] != "A" else "G"
+    ref[200] = "C" if ref[200] != "C" else "T"
+
+    window._set_reference_seq("".join(ref))
+    assert window.alignment is not None
+    assert window.diff_table.rowCount() == 2
+    assert window.chrom_view.reference is not None
+    assert window.diff_dock.isVisible()
+
+    # an edit inside the covered region is picked up on refresh;
+    # index 250 maps to reference position 150 — clear of both mutations
+    target = 250
+    new_base = "A" if seq[target] != "A" else "C"
+    window.apply_base_change(target, new_base)
+    assert window.diff_table.rowCount() == 3
+
+    out = tmp_path / "aligned.fasta"
+    monkeypatch.setattr(
+        "ui.main_window.QFileDialog.getSaveFileName",
+        lambda *a, **k: (str(out), "FASTA (*.fasta)"),
+    )
+    window._export_aligned()
+    text = out.read_text(encoding="utf-8")
+    assert text.count(">") == 2
+    seq_lines = [line for line in text.splitlines() if line and not line.startswith(">")]
+    assert len(seq_lines[0]) == len(seq_lines[1])
+
+    window._clear_reference()
+    assert window.alignment is None and window.chrom_view.reference is None
+    assert not window.grab().isNull()
+    window.close()
+
+
+@pytest.mark.skipif(not AB1, reason="no example .ab1 files")
 def test_session_autosave_and_restore(qapp, monkeypatch, tmp_path):
     from chrom_core import sessions
     from chrom_core.config import AppConfig
