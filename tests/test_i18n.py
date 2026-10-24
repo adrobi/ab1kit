@@ -2,6 +2,11 @@ import i18n
 from i18n import set_language, tr
 
 
+def test_key_parity_ru_en() -> None:
+    """Every RU key must have an EN counterpart and vice versa."""
+    assert set(i18n.RU) == set(i18n.EN)
+
+
 def setup_function() -> None:
     set_language("ru")
 

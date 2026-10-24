@@ -476,6 +476,9 @@ class ChromatogramWidget(QWidget):
         # often much taller than the rest of the read (FinchTV behaves the same)
         max_val = max(max(t[start:end]) for t in chrom.traces.values()) or 1
         usable = bottom - top - 4  # keep the tallest peak off the ruler
+        # with many trace points per pixel, decimate to min/max per pixel
+        # bucket: peak shapes are preserved, the polyline gets ~100x shorter
+        bucket = max(1, int(1 / self.zoom / 2)) if self.zoom < 0.5 else 1
         for base in "GATC":
             if base not in self.visible_channels:
                 continue
@@ -483,9 +486,21 @@ class ChromatogramWidget(QWidget):
             if self.smoothing:
                 values = self._smooth(list(values))
             poly = QPolygonF()
-            for j, value in enumerate(values):
-                y = bottom - 2 - value / max_val * usable
-                poly.append(QPointF(self._x(start + j), y))
+
+            def y_of(value) -> float:
+                return bottom - 2 - value / max_val * usable
+
+            if bucket == 1:
+                for j, value in enumerate(values):
+                    poly.append(QPointF(self._x(start + j), y_of(value)))
+            else:
+                for b0 in range(0, len(values), bucket):
+                    chunk = values[b0 : b0 + bucket]
+                    lo, hi = min(chunk), max(chunk)
+                    x0 = self._x(start + b0)
+                    x1 = self._x(start + b0 + len(chunk))
+                    poly.append(QPointF(x0, y_of(hi)))
+                    poly.append(QPointF(x1, y_of(lo)))
             painter.setPen(QPen(QColor(self.theme["bases"][base]), 2 if self.zoom >= 4 else 1))
             painter.drawPolyline(poly)
 

@@ -6,8 +6,8 @@ import sys
 from importlib.metadata import PackageNotFoundError, version as pkg_version
 from pathlib import Path
 
-from PySide6.QtCore import QMarginsF, QSizeF, Qt, Signal
-from PySide6.QtGui import QAction, QColor, QDragEnterEvent, QDropEvent, QPageSize, QPainter, QPdfWriter
+from PySide6.QtCore import QMarginsF, QSizeF, Qt, QUrl, Signal
+from PySide6.QtGui import QAction, QColor, QDesktopServices, QDragEnterEvent, QDropEvent, QPageSize, QPainter, QPdfWriter
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
 )
 
 from chrom_core import Chromatogram, EditableRead, batch, read_ab1, trim_window
+from chrom_core import blast as blast_api
 from chrom_core import export, sessions
 from chrom_core.align import ReadAlignment, align_read, gapped_sequences, parse_sequence
 from chrom_core.config import AppConfig, load_config, save_config
@@ -312,6 +313,15 @@ class MainWindow(QMainWindow):
         batch_action.toggled.connect(self.batch_dock.setVisible)
         self.batch_dock.visibilityChanged.connect(batch_action.setChecked)
         view_menu.addAction(batch_action)
+        lang_menu = view_menu.addMenu(tr("menu.view.language"))
+        self._lang_actions = {}
+        for code, label in (("ru", tr("lang.ru")), ("en", tr("lang.en"))):
+            action = QAction(label, self)
+            action.setCheckable(True)
+            action.setChecked(self.config.language == code)
+            action.triggered.connect(lambda _=False, c=code: self._switch_language(c))
+            lang_menu.addAction(action)
+            self._lang_actions[code] = action
 
         analysis_menu = self.menuBar().addMenu(tr("menu.analysis"))
         reference_action = QAction(tr("menu.analysis.reference"), self)
@@ -330,6 +340,10 @@ class MainWindow(QMainWindow):
         verify_action.setShortcut("Ctrl+Shift+V")
         verify_action.triggered.connect(self._verify_dialog)
         analysis_menu.addAction(verify_action)
+        analysis_menu.addSeparator()
+        blast_action = QAction(tr("menu.analysis.blast"), self)
+        blast_action.triggered.connect(self._blast_submit)
+        analysis_menu.addAction(blast_action)
 
         help_menu = self.menuBar().addMenu(tr("menu.help"))
         about_action = QAction(tr("menu.help.about"), self)
@@ -628,6 +642,26 @@ class MainWindow(QMainWindow):
         )
         export.write_text(path, content)
         self.statusBar().showMessage(tr("export.done", path=path), 5000)
+
+    # ------------------------------------------------------------------ BLAST
+    def _blast_submit(self) -> None:
+        if not self.read_model:
+            return
+        seq = "".join(self.read_model.seq)
+        try:
+            rid = blast_api.submit(blast_api.build_request(seq))
+        except (OSError, RuntimeError, ValueError) as exc:
+            QMessageBox.warning(self, tr("menu.analysis.blast"), str(exc))
+            return
+        QDesktopServices.openUrl(QUrl(blast_api.result_url(rid)))
+        self.statusBar().showMessage(tr("blast.sent", rid=rid), 10000)
+
+    def _switch_language(self, code: str) -> None:
+        self.config.language = code
+        save_config(self.config)
+        for other, action in self._lang_actions.items():
+            action.setChecked(other == code)
+        QMessageBox.information(self, tr("menu.view.language"), tr("lang.restart"))
 
     # ------------------------------------------------- expected SNP verification
     def _verify_dialog(self) -> None:
