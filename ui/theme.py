@@ -38,12 +38,19 @@ def theme(name: str) -> dict:
 
 
 def app_qss(dark: bool) -> str:
-    """Minimal application stylesheet; empty for the native light theme."""
-    if not dark:
-        return ""
+    """Application stylesheet. Both themes set explicit colors so the chrome
+    never depends on the OS light/dark mode (native dark Windows makes our
+    fixed light-theme text colors unreadable)."""
+    if dark:
+        return (
+            "QWidget { background-color: #252526; color: #d4d4d4; }"
+            "QMenuBar, QMenu, QToolBar { background-color: #2d2d30; }"
+            "QLineEdit, QSpinBox { background-color: #1e1e1e; }"
+            "QDockWidget::title { background-color: #2d2d30; }"
+        )
     return (
-        "QWidget { background-color: #252526; color: #d4d4d4; }"
-        "QMenuBar, QMenu, QToolBar { background-color: #2d2d30; }"
-        "QLineEdit, QSpinBox { background-color: #1e1e1e; }"
-        "QDockWidget::title { background-color: #2d2d30; }"
+        "QWidget { background-color: #f3f3f3; color: #1a1a1a; }"
+        "QMenuBar, QMenu, QToolBar { background-color: #e9e9e9; }"
+        "QLineEdit, QSpinBox { background-color: #ffffff; }"
+        "QDockWidget::title { background-color: #e9e9e9; }"
     )
