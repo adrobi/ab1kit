@@ -221,6 +221,52 @@ def test_reference_alignment_flow(qapp, monkeypatch, tmp_path):
 
 
 @pytest.mark.skipif(not AB1, reason="no example .ab1 files")
+def test_expected_snp_verification_flow(qapp, monkeypatch, tmp_path):
+    from chrom_core.config import AppConfig
+    from ui.main_window import MainWindow
+
+    sample = next(p for p in AB1 if "3730" in p.name)
+    window = MainWindow(AppConfig(recent_files=[]))
+    window.show()
+    assert window.open_path(sample)
+    seq = "".join(window.read_model.seq)
+    ref = list(seq[100:400])
+    alt1 = "A" if ref[50] != "A" else "G"
+    ref[50] = alt1  # read differs at ref 50 -> confirmed
+    alt2 = "C" if ref[200] != "C" else "T"
+    window._set_reference_seq("".join(ref))
+    assert window.alignment is not None
+
+    table = (
+        "name;pos;ref;alt\n"
+        f"snp1;51;{alt1};{seq[150]}\n"      # confirmed: read carries the "alt"
+        f"snp2;201;{seq[300]};{alt2}\n"     # not found (read shows ref base)
+        "snp3;5000;A;T\n"                   # beyond the reference
+    )
+    window._verify_variants(table)
+
+    assert len(window.variant_verdicts) == 3
+    verdicts = [v.verdict for v in window.variant_verdicts]
+    assert verdicts[0] in ("confirmed", "heterozygous", "low_quality")
+    assert verdicts[1] in ("not_found", "low_quality")
+    assert verdicts[2] == "unsupported"  # position 5000 is beyond the reference
+    assert window.verify_table.rowCount() == 3
+    assert window.verify_dock.isVisible()
+    assert len(window.chrom_view.snp_marks) >= 1
+
+    out = tmp_path / "report.csv"
+    monkeypatch.setattr(
+        "ui.main_window.QFileDialog.getSaveFileName",
+        lambda *a, **k: (str(out), "CSV (*.csv)"),
+    )
+    window._save_verify_csv()
+    text = out.read_text(encoding="utf-8")
+    assert "position" in text and "snp1" in text
+    assert not window.grab().isNull()
+    window.close()
+
+
+@pytest.mark.skipif(not AB1, reason="no example .ab1 files")
 def test_session_autosave_and_restore(qapp, monkeypatch, tmp_path):
     from chrom_core import sessions
     from chrom_core.config import AppConfig

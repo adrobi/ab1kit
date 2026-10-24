@@ -20,6 +20,16 @@ LETTER_H = 24        # called-base letters below the traces
 REF_H = 18           # reference letters row (shown while a reference is loaded)
 Q_STRIP_H = 56       # per-base quality bars at the bottom
 
+SNP_MARK_COLORS = {
+    "confirmed": "#1e9e1e",
+    "heterozygous": "#e0a000",
+    "not_found": "#e02020",
+    "low_quality": "#b0b020",
+    "no_data": "#808080",
+    "ref_mismatch": "#a040c0",
+    "unsupported": "#808080",
+}
+
 
 class ChromatogramWidget(QWidget):
     """Paints trace polylines, called bases and per-base quality bars.
@@ -45,6 +55,7 @@ class ChromatogramWidget(QWidget):
         self.edited: dict[int, str | None] = {}      # edited position -> original base
         self.trim_region: tuple[int, int] | None = None  # base range [start, end)
         self.reference: tuple[str, dict[int, int]] | None = None  # letters + ref->read map
+        self.snp_marks: list[tuple[int, str]] = []  # (read index, verdict) for expected SNPs
         self._hover_x: float | None = None
         self._drag_x: float | None = None
         self._press_x: float | None = None
@@ -64,6 +75,7 @@ class ChromatogramWidget(QWidget):
         self.highlights = []
         self.trim_region = None
         self.reference = None
+        self.snp_marks = []
         self._avg_spacing = self._total_points() / max(1, len(chrom.seq))
         self.offset = self._clamp_offset(self.offset)
         self.update()
@@ -71,6 +83,10 @@ class ChromatogramWidget(QWidget):
 
     def set_reference(self, letters: str | None, ref_to_read: dict[int, int] | None = None) -> None:
         self.reference = (letters, dict(ref_to_read)) if letters else None
+        self.update()
+
+    def set_snp_marks(self, marks: list[tuple[int, str]]) -> None:
+        self.snp_marks = list(marks)
         self.update()
 
     def set_edited(self, edited: dict[int, str | None]) -> None:
@@ -334,6 +350,7 @@ class ChromatogramWidget(QWidget):
 
         self._paint_highlights(painter, w, h)
         self._paint_grid(painter, w, trace_top, trace_bottom)
+        self._paint_snp_marks(painter, w, h)
         self._paint_ruler(painter, w)
         self._paint_traces(painter, w, trace_top, trace_bottom)
         self._paint_bases(painter, w, h)
@@ -364,6 +381,21 @@ class ChromatogramWidget(QWidget):
                 QColor(self.theme["dim"] if matches else self.theme["low_q"])
             )
             painter.drawText(QPointF(x - 3, y), letter)
+
+    def _paint_snp_marks(self, painter: QPainter, w: int, h: int) -> None:
+        if not self.snp_marks or not self.chrom:
+            return
+        peaks = self.chrom.peak_indices
+        for read_idx, verdict in self.snp_marks:
+            if not 0 <= read_idx < len(peaks):
+                continue
+            x = self._x(peaks[read_idx])
+            if x < 0 or x > w:
+                continue
+            color = QColor(SNP_MARK_COLORS.get(verdict, "#808080"))
+            color.setAlpha(110)
+            painter.setPen(QPen(color, 3))
+            painter.drawLine(QPointF(x, RULE_H), QPointF(x, h - 2))
 
     def _paint_trim(self, painter: QPainter, w: int, h: int) -> None:
         bounds = self._trim_boundaries()

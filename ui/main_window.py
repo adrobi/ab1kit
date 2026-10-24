@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QDockWidget,
     QFileDialog,
     QFormLayout,
+    QHBoxLayout,
     QInputDialog,
     QLabel,
     QLineEdit,
@@ -38,6 +39,7 @@ from chrom_core.align import ReadAlignment, align_read, gapped_sequences, parse_
 from chrom_core.config import AppConfig, load_config, save_config
 from chrom_core.editing import INSERT_LETTERS, IUPAC_LETTERS
 from chrom_core.snps import call_snps
+from chrom_core.verify import parse_expected, verify_expected, verdicts_csv, verdicts_xlsx
 from chrom_core.seqops import find_matches
 from i18n import set_language, tr
 from ui.batch_panel import BatchPanel
@@ -154,6 +156,7 @@ class MainWindow(QMainWindow):
         self.reference_seq: str = ""
         self.alignment: ReadAlignment | None = None
         self.snp_calls: list = []
+        self.variant_verdicts: list = []
         self._search_ranges: list[tuple[int, int]] = []
         self._search_pos = -1
 
@@ -175,6 +178,7 @@ class MainWindow(QMainWindow):
         self._build_info_dock()
         self._build_batch_dock()
         self._build_analysis_dock()
+        self._build_verify_dock()
         self._build_menus()
         self._connect()
         self.setAcceptDrops(True)
@@ -321,6 +325,11 @@ class MainWindow(QMainWindow):
         export_aligned = QAction(tr("menu.analysis.export_aligned"), self)
         export_aligned.triggered.connect(self._export_aligned)
         analysis_menu.addAction(export_aligned)
+        analysis_menu.addSeparator()
+        verify_action = QAction(tr("menu.analysis.verify"), self)
+        verify_action.setShortcut("Ctrl+Shift+V")
+        verify_action.triggered.connect(self._verify_dialog)
+        analysis_menu.addAction(verify_action)
 
         help_menu = self.menuBar().addMenu(tr("menu.help"))
         about_action = QAction(tr("menu.help.about"), self)
@@ -366,6 +375,42 @@ class MainWindow(QMainWindow):
         self.diff_dock.setWidget(self.diff_table)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.diff_dock)
         self.diff_dock.hide()
+
+    def _build_verify_dock(self) -> None:
+        self.verify_dock = QDockWidget(tr("verify.title"), self)
+        self.verify_table = QTableWidget(0, 8)
+        self.verify_table.setHorizontalHeaderLabels(
+            [
+                tr("verify.col.name"),
+                tr("verify.col.pos"),
+                tr("verify.col.ref"),
+                tr("verify.col.alt"),
+                tr("verify.col.verdict"),
+                tr("verify.col.observed"),
+                tr("verify.col.q"),
+                tr("verify.col.note"),
+            ]
+        )
+        self.verify_table.verticalHeader().setVisible(False)
+        self.verify_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.verify_table.setSortingEnabled(True)
+        buttons = QWidget()
+        row = QHBoxLayout(buttons)
+        csv_button = QPushButton(tr("verify.save_csv"))
+        csv_button.clicked.connect(self._save_verify_csv)
+        xlsx_button = QPushButton(tr("verify.save_xlsx"))
+        xlsx_button.clicked.connect(self._save_verify_xlsx)
+        row.addWidget(csv_button)
+        row.addWidget(xlsx_button)
+        row.addStretch(1)
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.verify_table)
+        layout.addWidget(buttons)
+        self.verify_dock.setWidget(container)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.verify_dock)
+        self.verify_dock.hide()
 
     def _connect(self) -> None:
         self.chrom_view.view_changed.connect(self._sync_from_view)
@@ -582,6 +627,123 @@ class MainWindow(QMainWindow):
             + export.to_fasta(f"{sample}_read_{strand}", read_aligned)
         )
         export.write_text(path, content)
+        self.statusBar().showMessage(tr("export.done", path=path), 5000)
+
+    # ------------------------------------------------- expected SNP verification
+    def _verify_dialog(self) -> None:
+        if not (self.read_model and self.alignment and self.reference_seq):
+            self.statusBar().showMessage(tr("verify.need_reference"), 6000)
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            tr("menu.analysis.verify"),
+            str(self._path.parent) if self._path else "",
+            "Variants (*.vcf *.csv *.tsv *.txt);;All files (*)",
+        )
+        if not path:
+            return
+        try:
+            text = Path(path).read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            QMessageBox.warning(self, tr("verify.title"), str(exc))
+            return
+        self._verify_variants(text)
+
+    def _verify_variants(self, text: str) -> None:
+        try:
+            variants, warnings = parse_expected(text)
+        except ValueError as exc:
+            QMessageBox.warning(self, tr("verify.title"), str(exc))
+            return
+        if not variants:
+            QMessageBox.warning(self, tr("verify.title"), tr("search.none"))
+            return
+        self.variant_verdicts = verify_expected(
+            self.alignment,
+            self.read_model.current(),
+            self.reference_seq,
+            variants,
+            min_q=self.config.snp_min_q,
+            het_ratio=self.config.het_ratio,
+        )
+        self._fill_verify_table()
+        self.verify_dock.show()
+        self.chrom_view.set_snp_marks(
+            [(v.read_pos, v.verdict) for v in self.variant_verdicts if v.read_pos is not None]
+        )
+        counts = {k: sum(1 for v in self.variant_verdicts if v.verdict == k)
+                  for k in ("confirmed", "heterozygous", "not_found", "no_data")}
+        message = tr(
+            "verify.summary",
+            n=len(self.variant_verdicts),
+            confirmed=counts["confirmed"],
+            het=counts["heterozygous"],
+            notfound=counts["not_found"],
+            nodata=counts["no_data"],
+        )
+        if warnings:
+            message += f" · {len(warnings)} ⚠"
+        self.statusBar().showMessage(message, 10000)
+
+    def _fill_verify_table(self) -> None:
+        labels = {
+            "confirmed": tr("verify.confirmed"),
+            "heterozygous": tr("verify.heterozygous"),
+            "not_found": tr("verify.not_found"),
+            "no_data": tr("verify.no_data"),
+            "ref_mismatch": tr("verify.ref_mismatch"),
+            "low_quality": tr("verify.low_quality"),
+            "unsupported": tr("verify.unsupported"),
+        }
+        colors = {
+            "confirmed": "#1e9e1e",
+            "heterozygous": "#e0a000",
+            "not_found": "#e02020",
+        }
+        self.verify_table.setSortingEnabled(False)
+        self.verify_table.setRowCount(len(self.variant_verdicts))
+        for row, v in enumerate(self.variant_verdicts):
+            values = [
+                v.variant.name,
+                v.variant.position,
+                v.variant.ref,
+                v.variant.alt,
+                labels.get(v.verdict, v.verdict),
+                v.observed,
+                v.quality if v.quality is not None else "",
+                v.note,
+            ]
+            for col, value in enumerate(values):
+                item = QTableWidgetItem()
+                item.setData(Qt.ItemDataRole.DisplayRole, value)
+                if col == 4 and v.verdict in colors:
+                    item.setForeground(QColor(colors[v.verdict]))
+                self.verify_table.setItem(row, col, item)
+        self.verify_table.setSortingEnabled(True)
+
+    def _save_verify_csv(self) -> None:
+        if not self.variant_verdicts:
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, tr("verify.save_csv"), "snp_report.csv", "CSV (*.csv)"
+        )
+        if path:
+            export.write_text(path, verdicts_csv(self.variant_verdicts))
+            self.statusBar().showMessage(tr("export.done", path=path), 5000)
+
+    def _save_verify_xlsx(self) -> None:
+        if not self.variant_verdicts:
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, tr("verify.save_xlsx"), "snp_report.xlsx", "Excel (*.xlsx)"
+        )
+        if not path:
+            return
+        try:
+            verdicts_xlsx(path, self.variant_verdicts, sample_id=self._export_id())
+        except RuntimeError as exc:
+            QMessageBox.warning(self, tr("verify.save_xlsx"), str(exc))
+            return
         self.statusBar().showMessage(tr("export.done", path=path), 5000)
 
     # ------------------------------------------------------------------ batch
