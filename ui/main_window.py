@@ -7,7 +7,7 @@ from importlib.metadata import PackageNotFoundError, version as pkg_version
 from pathlib import Path
 
 from PySide6.QtCore import QMarginsF, QSizeF, Qt, Signal
-from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent, QPageSize, QPainter, QPdfWriter
+from PySide6.QtGui import QAction, QColor, QDragEnterEvent, QDropEvent, QPageSize, QPainter, QPdfWriter
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -37,6 +37,7 @@ from chrom_core import export, sessions
 from chrom_core.align import ReadAlignment, align_read, gapped_sequences, parse_sequence
 from chrom_core.config import AppConfig, load_config, save_config
 from chrom_core.editing import INSERT_LETTERS, IUPAC_LETTERS
+from chrom_core.snps import call_snps
 from chrom_core.seqops import find_matches
 from i18n import set_language, tr
 from ui.batch_panel import BatchPanel
@@ -152,6 +153,7 @@ class MainWindow(QMainWindow):
         self.batch_reports: list[batch.FileReport] = []
         self.reference_seq: str = ""
         self.alignment: ReadAlignment | None = None
+        self.snp_calls: list = []
         self._search_ranges: list[tuple[int, int]] = []
         self._search_pos = -1
 
@@ -345,7 +347,7 @@ class MainWindow(QMainWindow):
 
     def _build_analysis_dock(self) -> None:
         self.diff_dock = QDockWidget(tr("analysis.diffs.title"), self)
-        self.diff_table = QTableWidget(0, 5)
+        self.diff_table = QTableWidget(0, 8)
         self.diff_table.setHorizontalHeaderLabels(
             [
                 tr("analysis.col.pos"),
@@ -353,6 +355,9 @@ class MainWindow(QMainWindow):
                 tr("analysis.col.ref"),
                 tr("analysis.col.read"),
                 tr("analysis.col.readpos"),
+                tr("snp.col.verdict"),
+                tr("snp.col.q"),
+                tr("snp.col.ratio"),
             ]
         )
         self.diff_table.verticalHeader().setVisible(False)
@@ -489,6 +494,11 @@ class MainWindow(QMainWindow):
             self._clear_reference()
             return
         self.chrom_view.set_reference(self.reference_seq, self.alignment.ref_to_read)
+        chrom = self.read_model.current()
+        self.snp_calls = call_snps(
+            self.alignment, chrom,
+            min_q=self.config.snp_min_q, het_ratio=self.config.het_ratio,
+        )
         self._fill_diff_table()
         self.diff_dock.setVisible(bool(self.alignment.differences))
         pct = f"{self.alignment.identity * 100:.1f}"
@@ -502,6 +512,15 @@ class MainWindow(QMainWindow):
             )
         else:
             message = tr("analysis.no_diffs")
+        if self.snp_calls:
+            counts = {k: sum(1 for c in self.snp_calls if c.kind == k)
+                      for k in ("homozygous", "heterozygous", "low_quality")}
+            message += " · " + tr(
+                "snp.summary",
+                homo=counts["homozygous"],
+                het=counts["heterozygous"],
+                low=counts["low_quality"],
+            )
         if self.alignment.alternatives > 1:
             message += " · " + tr("analysis.ambiguous", n=self.alignment.alternatives)
         self.statusBar().showMessage(message, 8000)
@@ -512,20 +531,38 @@ class MainWindow(QMainWindow):
             "deletion": tr("analysis.kind.deletion"),
             "insertion": tr("analysis.kind.insertion"),
         }
+        verdict_labels = {
+            "homozygous": tr("snp.homozygous"),
+            "heterozygous": tr("snp.heterozygous"),
+            "low_quality": tr("snp.low_quality"),
+        }
+        calls_by_ref = {c.ref_pos: c for c in getattr(self, "snp_calls", [])}
         diffs = self.alignment.differences if self.alignment else []
         self.diff_table.setSortingEnabled(False)
         self.diff_table.setRowCount(len(diffs))
         for row, diff in enumerate(diffs):
+            call = calls_by_ref.get(diff.ref_pos)
+            verdict = ""
+            if call is not None:
+                verdict = verdict_labels.get(call.kind, call.kind)
+                if call.kind == "heterozygous":
+                    verdict += f" ({call.iupac})"
             values = [
                 diff.ref_pos + 1,
                 kind_labels.get(diff.kind, diff.kind),
                 diff.ref_base,
                 diff.read_base,
-                diff.read_pos + 1 if diff.read_pos is not None else "",
+                (call.read_pos + 1 if call is not None
+                 else diff.read_pos + 1 if diff.read_pos is not None else ""),
+                verdict,
+                call.quality if call is not None else "",
+                f"{call.ratio:.2f}" if call is not None and call.ratio is not None else "",
             ]
             for col, value in enumerate(values):
                 item = QTableWidgetItem()
                 item.setData(Qt.ItemDataRole.DisplayRole, value)
+                if call is not None and col == 5 and call.kind == "heterozygous":
+                    item.setForeground(QColor("#a05000"))
                 self.diff_table.setItem(row, col, item)
         self.diff_table.setSortingEnabled(True)
 

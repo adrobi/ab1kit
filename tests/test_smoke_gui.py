@@ -191,6 +191,10 @@ def test_reference_alignment_flow(qapp, monkeypatch, tmp_path):
     assert window.diff_table.rowCount() == 2
     assert window.chrom_view.reference is not None
     assert window.diff_dock.isVisible()
+    # each substitution row carries an SNP verdict
+    for row in range(window.diff_table.rowCount()):
+        verdict = window.diff_table.item(row, 5).text()
+        assert verdict  # homo/hetero/low-quality label present
 
     # an edit inside the covered region is picked up on refresh;
     # index 250 maps to reference position 150 — clear of both mutations

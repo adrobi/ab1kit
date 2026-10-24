@@ -12,6 +12,8 @@ from pathlib import Path
 class AppConfig:
     trim_window: int = 20
     trim_min_q: int = 20
+    snp_min_q: int = 20
+    het_ratio: float = 0.4
     theme: str = "light"        # "light" | "dark"
     language: str = "ru"        # "ru" | "en"
     recent_files: list[str] = field(default_factory=list)
