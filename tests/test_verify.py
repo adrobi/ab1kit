@@ -11,35 +11,9 @@ from chrom_core.verify import (
     verify_expected,
     verdicts_csv,
 )
+from clone_fixtures import make_chrom
 
 EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
-SPACING = 10
-
-
-def make_chrom(seq: str, quality: int = 40, heights: dict | None = None) -> object:
-    from chrom_core.abif import Chromatogram
-    from chrom_core.seqops import IUPAC
-
-    heights = heights or {}
-    n = len(seq)
-    total = (n + 1) * SPACING
-    traces = {base: [80] * total for base in "ACGT"}
-    peaks = []
-    for i, called in enumerate(seq.upper()):
-        peak = (i + 1) * SPACING
-        peaks.append(peak)
-        active = set(IUPAC[called]) if called in IUPAC else set("ACGT")
-        for base in "ACGT":
-            traces[base][peak] = 1000 if base in active else 60
-    for (index, base), value in heights.items():
-        traces[base][(index + 1) * SPACING] = value
-    return Chromatogram(
-        sample_id="synthetic",
-        seq=seq,
-        quality=(quality,) * n,
-        traces={b: tuple(t) for b, t in traces.items()},
-        peak_indices=tuple(peaks),
-    )
 
 
 # ------------------------------------------------------------------- parsing

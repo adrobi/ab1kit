@@ -22,7 +22,8 @@ from dataclasses import dataclass
 from chrom_core.abif import Chromatogram
 from chrom_core.align import ReadAlignment
 from chrom_core.seqops import IUPAC
-from chrom_core.snps import DEFAULT_HET_RATIO, DEFAULT_MIN_Q, alleles_to_iupac, peak_heights
+from chrom_core.peaks import secondary_peak
+from chrom_core.snps import DEFAULT_HET_RATIO, DEFAULT_MIN_Q, alleles_to_iupac
 
 
 @dataclass(frozen=True)
@@ -169,15 +170,10 @@ def _verify_one(
 
     read_idx = alignment.ref_to_read[pos]
     quality = chrom.quality[read_idx]
-    heights = peak_heights(chrom, read_idx)
     called = chrom.seq[read_idx].upper()
     called_alleles = set(IUPAC.get(called, "ACGT"))
-    primary = max((heights.get(b, 0) for b in called_alleles), default=0) or max(
-        heights.values(), default=0
-    )
-    outside = [(b, h) for b, h in heights.items() if b not in called_alleles]
-    secondary_base, secondary = max(outside, key=lambda kv: kv[1]) if outside else ("", 0)
-    ratio = secondary / primary if primary > 0 else None
+    peak = secondary_peak(chrom, read_idx)
+    secondary_base, ratio = peak.base, peak.ratio
 
     alleles = set(called_alleles)
     if ratio is not None and ratio >= het_ratio and secondary_base:

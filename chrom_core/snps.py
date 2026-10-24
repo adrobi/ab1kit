@@ -4,7 +4,8 @@ A substitution difference between read and reference becomes one of:
 - ``homozygous``  — clean single peak of a non-reference base;
 - ``heterozygous``— double peak: a second channel rises to at least
   ``het_ratio`` of the primary height at the same position (classic ~50/50
-  Sanger het), or the basecaller itself emitted an IUPAC mixed base;
+  Sanger het; heights normalised per dye, see :mod:`chrom_core.peaks`), or
+  the basecaller itself emitted an IUPAC mixed base;
 - ``low_quality`` — phred below ``min_q``; reported but flagged untrusted.
 """
 
@@ -14,6 +15,7 @@ from dataclasses import dataclass
 
 from chrom_core.abif import Chromatogram
 from chrom_core.align import ReadAlignment
+from chrom_core.peaks import secondary_peak
 from chrom_core.seqops import IUPAC
 
 DEFAULT_MIN_Q = 20
@@ -41,7 +43,7 @@ class SnpCall:
     read_base: str        # called base at the position (may itself be IUPAC)
     kind: str             # 'homozygous' | 'heterozygous' | 'low_quality'
     quality: int
-    ratio: float | None   # secondary/primary peak height; None if unmeasurable
+    ratio: float | None   # normalised secondary/primary peak height; None if unmeasurable
     iupac: str            # code summarizing the observed alleles
     note: str = ""
 
@@ -49,7 +51,10 @@ class SnpCall:
 def peak_heights(
     chrom: Chromatogram, read_index: int, window: int = PEAK_WINDOW
 ) -> dict[str, float]:
-    """Max trace intensity per channel around the called peak."""
+    """Raw max trace intensity per channel around the called peak (tooltips).
+
+    Not used for het calls: those go through :func:`chrom_core.peaks.secondary_peak`.
+    """
     peak = chrom.peak_indices[read_index]
     heights = {}
     for base, trace in chrom.traces.items():
@@ -80,21 +85,9 @@ def call_snps(
             continue
         quality = chrom.quality[read_idx]
         called = chrom.seq[read_idx].upper()
-        heights = peak_heights(chrom, read_idx)
-
+        peak = secondary_peak(chrom, read_idx)
         called_concrete = set(IUPAC.get(called, "ACGT"))
-        primary = max(heights.get(b, 0.0) for b in called_concrete) or max(
-            heights.values()
-        )
-        secondary_base, secondary = max(
-            ((b, h) for b, h in heights.items()), key=lambda kv: kv[1]
-        )
-        # the strongest channel should be one of the called alleles; the
-        # secondary candidate is the strongest channel outside them
-        outside = [(b, h) for b, h in heights.items() if b not in called_concrete]
-        if outside:
-            secondary_base, secondary = max(outside, key=lambda kv: kv[1])
-        ratio = secondary / primary if primary > 0 else None
+        secondary_base, ratio = peak.base, peak.ratio
 
         alleles = set(called_concrete)
         if ratio is not None and ratio >= het_ratio:
