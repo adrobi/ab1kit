@@ -1,0 +1,62 @@
+LOCUS       KC569719                 625 bp    DNA     linear   INV 01-JAN-2015
+DEFINITION  Allolobophora chlorotica voucher Acy224 cytochrome oxidase subunit
+            1 (COI) gene, partial cds; mitochondrial.
+ACCESSION   KC569719
+VERSION     KC569719.1
+KEYWORDS    .
+SOURCE      mitochondrion Allolobophora chlorotica
+  ORGANISM  Allolobophora chlorotica
+            Eukaryota; Metazoa; Spiralia; Lophotrochozoa; Annelida; Clitellata;
+            Oligochaeta; Crassiclitellata; Lumbricina; Lumbricidae;
+            Lumbricinae; Allolobophora.
+REFERENCE   1  (bases 1 to 625)
+  AUTHORS   Dupont,L., Gresille,Y., Richard,B., Decaens,T. and Mathieu,J.
+  TITLE     Fine-scale spatial genetic structure of two earthworm species,
+            Allolobophora chlorotica and Aporrectodea icterica (Annelida,
+            Clitellata) in temperate pastures related to dispersal constraints
+  JOURNAL   Unpublished
+REFERENCE   2  (bases 1 to 625)
+  AUTHORS   Dupont,L., Gresille,Y., Richard,B., Decaens,T. and Mathieu,J.
+  TITLE     Direct Submission
+  JOURNAL   Submitted (01-FEB-2013) UMR7618 BIOEMCO IBIOS, Faculte des Sciences
+            et Technologie UPEC, 61 Avn General de Gaulle, Creteil, IDF 94010,
+            France
+FEATURES             Location/Qualifiers
+     source          1..625
+                     /organism="Allolobophora chlorotica"
+                     /organelle="mitochondrion"
+                     /mol_type="genomic DNA"
+                     /specimen_voucher="Acy224"
+                     /db_xref="taxon:302034"
+                     /haplogroup="L2"
+                     /geo_loc_name="France"
+                     /collection_date="01-Apr-2009"
+                     /PCR_primers="fwd_name: lco1490, fwd_seq:
+                     ggtcaacaaatcataaagatattgg, rev_name: hco2198, rev_seq:
+                     taaacttcagggtgaccaaaaaatca"
+     gene            <1..>625
+                     /gene="COI"
+     CDS             <1..>625
+                     /gene="COI"
+                     /codon_start=2
+                     /transl_table=5
+                     /product="cytochrome oxidase subunit 1"
+                     /protein_id="AHB64231.1"
+                     /translation="SLLIRIELSQPGAFLGSDQLYNTIVTAHAFVMIFFLVMPVFIGG
+                     FGNWLLPLMLGAPDMAFPRLNNMSFWLLPPSLILLVSSAAVEKGAGTGWTVYPPLASN
+                     IAHAGPSVDLAIFSLHLAGASSILGAINFITTVINMRWSGLRLERIPLFVWAVLITVV
+                     LLLLSLPVLAGAITMLLTDRNLNTSFFDPAGGGDPILYQHLFWFFGHP"
+ORIGIN      
+        1 aagactccta attcgaattg agctaagaca gccgggagca tttctaggaa gggatcaact
+       61 ctataacact attgtaactg ctcacgcatt tgtaataatt ttctttctag taatacctgt
+      121 atttattggg gggttcggta attgacttct gcctttaata cttggagccc ctgacatggc
+      181 attcccacgt cttaacaaca taagattttg actccttccc ccatcactaa tccttctagt
+      241 atcctctgct gcagtagaaa agggtgcggg aactggatga actgtttatc cacccctagc
+      301 aagaaacatt gctcatgccg gcccatctgt agacttagct attttttctc ttcatttagc
+      361 aggtgcttca tcaatcttgg gtgccattaa ttttattact actgttatta atatacgatg
+      421 aagaggctta cgacttgaac gaatcccatt attcgtttga gccgtactaa ttacagtggt
+      481 ccttctactc ttatccttac cagtattagc cggtgcaatt actatactac ttaccgatcg
+      541 aaatctaaat acctccttct ttgaccctgc tggaggtggg gatccaatcc tatatcaaca
+      601 cttattctga ttttttggtc accct
+//
+

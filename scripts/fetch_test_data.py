@@ -2,7 +2,7 @@
 
 Usage::
 
-    python scripts/fetch_test_data.py --coi ACCESSION [--force]
+    python scripts/fetch_test_data.py --coi ACC [--coi ACC ...] [--force]
 
 Uses only ``urllib``. Idempotent: files that already exist are skipped
 unless ``--force`` is given. Tests never touch the network; the downloaded
@@ -71,15 +71,15 @@ def _fetch(url: str, target: Path, force: bool, ncbi: bool = False) -> None:
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--coi", metavar="ACC", help="GenBank accession of the COI reference")
+    parser.add_argument("--coi", metavar="ACC", action="append", default=[], help="GenBank accession of a COI reference (repeatable)")
     parser.add_argument("--force", action="store_true", help="re-download existing files")
     args = parser.parse_args(argv)
 
     for name in READS:
         _fetch(SANGER_BASE + name, DATA / "real" / name, args.force)
     _fetch(_genbank_url("L09137"), DATA / "refs" / "pUC19_L09137.gb", args.force, ncbi=True)
-    if args.coi:
-        _fetch(_genbank_url(args.coi), DATA / "refs" / f"coi_{args.coi}.gb", args.force, ncbi=True)
+    for acc in args.coi:
+        _fetch(_genbank_url(acc), DATA / "refs" / f"coi_{acc}.gb", args.force, ncbi=True)
     _fetch(SNAPGENE_URL, DATA / "refs" / "sample-d.dna", args.force)
 
 
