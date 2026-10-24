@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ab1kit"
-version = "0.1.0"
+version = "1.0.0"
 description = "Open-source desktop tool for viewing, editing and analyzing Sanger sequencing chromatograms (.ab1)"
 readme = "README.md"
 license = { file = "LICENSE" }

@@ -1,0 +1,27 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  windows-exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install -e ".[dev]" pyinstaller
+      - run: python -m pyinstaller ab1kit.spec --noconfirm --clean
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ab1kit-windows
+          path: dist/ab1kit.exe
+      - name: Create GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/ab1kit.exe
+          generate_release_notes: true
