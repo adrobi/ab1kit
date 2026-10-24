@@ -80,7 +80,7 @@ def test_construct_from_text_defaults():
 def test_origin_spanning_feature(tmp_path):
     p = tmp_path / "o.gb"
     p.write_text(
-        "LOCUS       t   12 bp    DNA     circular   SYN 01-JAN-2000\n"
+        "LOCUS       t                         12 bp    DNA     circular SYN 01-JAN-2000\n"
         "FEATURES             Location/Qualifiers\n"
         "     misc_feature    join(9..12,1..3)\n"
         '                     /label="wrap"\n'
