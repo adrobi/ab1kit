@@ -145,6 +145,34 @@ def test_trim_dialog_wiring(qapp, monkeypatch):
 
 
 @pytest.mark.skipif(not AB1, reason="no example .ab1 files")
+def test_batch_panel_flow(qapp, monkeypatch, tmp_path):
+    from chrom_core.config import AppConfig
+    from ui.main_window import MainWindow
+
+    monkeypatch.setattr(
+        "ui.main_window.QFileDialog.getExistingDirectory",
+        lambda *a, **k: str(tmp_path / "export"),
+    )
+    window = MainWindow(AppConfig(recent_files=[]))
+    window.show()
+    window._scan_folder(EXAMPLES)
+
+    assert window.batch_dock.isVisible()
+    assert window.batch_panel.table.rowCount() == len(AB1)
+    assert window.batch_reports
+
+    # double-click wiring: signal opens the file in the viewer
+    window.batch_panel.open_requested.emit(str(AB1[0]))
+    assert window.chrom_view.chrom is not None
+
+    window._batch_export()
+    exported = sorted((tmp_path / "export").glob("*.trimmed.fastq"))
+    assert len(exported) == len(AB1)
+    assert not window.grab().isNull()
+    window.close()
+
+
+@pytest.mark.skipif(not AB1, reason="no example .ab1 files")
 def test_session_autosave_and_restore(qapp, monkeypatch, tmp_path):
     from chrom_core import sessions
     from chrom_core.config import AppConfig

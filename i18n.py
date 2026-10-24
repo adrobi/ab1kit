@@ -10,6 +10,7 @@ from translations_en import EN
 RU = {
     "menu.file": "&Файл",
     "menu.file.open": "&Открыть .ab1…",
+    "menu.file.open_folder": "Открыть &папку…",
     "menu.file.recent": "Недавние",
     "menu.file.save_session": "Сохранить сессию &правок",
     "menu.file.export": "&Экспорт",
@@ -82,6 +83,20 @@ RU = {
     "copy.done": "Последовательность скопирована ({n} баз)",
     "session.saved": "Сессия правок сохранена",
     "session.loaded": "Восстановлена сессия правок",
+    "menu.view.batch_panel": "Панель батч-режима",
+    "batch.title": "Батч-режим",
+    "batch.export": "Экспорт обрезанных…",
+    "batch.csv": "Сохранить CSV…",
+    "batch.hide_bad": "Скрыть плохие",
+    "batch.col.file": "Файл",
+    "batch.col.length": "Длина",
+    "batch.col.meanq": "Ср. Q",
+    "batch.col.q20": "Q≥20",
+    "batch.col.trim": "После обрезки",
+    "batch.col.status": "Статус",
+    "batch.scan_done": "Просканировано файлов: {n}",
+    "batch.exported": "Экспортировано: {n}, ошибок: {err}",
+    "batch.export_dir": "Куда экспортировать",
     "err.open_failed": "Не удалось открыть файл",
 }
 

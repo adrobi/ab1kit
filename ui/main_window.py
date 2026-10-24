@@ -29,12 +29,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from chrom_core import Chromatogram, EditableRead, read_ab1, trim_window
+from chrom_core import Chromatogram, EditableRead, batch, read_ab1, trim_window
 from chrom_core import export, sessions
 from chrom_core.config import AppConfig, load_config, save_config
 from chrom_core.editing import INSERT_LETTERS, IUPAC_LETTERS
 from chrom_core.seqops import find_matches
 from i18n import set_language, tr
+from ui.batch_panel import BatchPanel
 from ui.chrom_view import ChromatogramWidget
 from ui.minimap import MiniMap
 from ui.theme import app_qss, theme as palette
@@ -144,6 +145,7 @@ class MainWindow(QMainWindow):
         self._path: Path | None = None
         self.read_model: EditableRead | None = None
         self.trim_dialog: TrimDialog | None = None
+        self.batch_reports: list[batch.FileReport] = []
         self._search_ranges: list[tuple[int, int]] = []
         self._search_pos = -1
 
@@ -163,6 +165,7 @@ class MainWindow(QMainWindow):
         self._channel_boxes: dict[str, QCheckBox] = {}
         self._build_toolbar()
         self._build_info_dock()
+        self._build_batch_dock()
         self._build_menus()
         self._connect()
         self.setAcceptDrops(True)
@@ -206,6 +209,10 @@ class MainWindow(QMainWindow):
         open_action.setShortcut("Ctrl+O")
         open_action.triggered.connect(self._open_dialog)
         file_menu.addAction(open_action)
+        open_folder = QAction(tr("menu.file.open_folder"), self)
+        open_folder.setShortcut("Ctrl+Shift+O")
+        open_folder.triggered.connect(self._open_folder_dialog)
+        file_menu.addAction(open_folder)
         self.recent_menu = file_menu.addMenu(tr("menu.file.recent"))
         save_session = QAction(tr("menu.file.save_session"), self)
         save_session.setShortcut("Ctrl+S")
@@ -287,6 +294,11 @@ class MainWindow(QMainWindow):
         info_action.toggled.connect(self.info_dock.setVisible)
         self.info_dock.visibilityChanged.connect(info_action.setChecked)
         view_menu.addAction(info_action)
+        batch_action = QAction(tr("menu.view.batch_panel"), self)
+        batch_action.setCheckable(True)
+        batch_action.toggled.connect(self.batch_dock.setVisible)
+        self.batch_dock.visibilityChanged.connect(batch_action.setChecked)
+        view_menu.addAction(batch_action)
 
         help_menu = self.menuBar().addMenu(tr("menu.help"))
         about_action = QAction(tr("menu.help.about"), self)
@@ -300,6 +312,16 @@ class MainWindow(QMainWindow):
         self.info_dock.setWidget(QWidget())
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.info_dock)
         self.info_dock.hide()
+
+    def _build_batch_dock(self) -> None:
+        self.batch_dock = QDockWidget(tr("batch.title"), self)
+        self.batch_panel = BatchPanel()
+        self.batch_dock.setWidget(self.batch_panel)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.batch_dock)
+        self.batch_dock.hide()
+        self.batch_panel.open_requested.connect(self.open_path)
+        self.batch_panel.export_button.clicked.connect(self._batch_export)
+        self.batch_panel.csv_button.clicked.connect(self._batch_save_csv)
 
     def _connect(self) -> None:
         self.chrom_view.view_changed.connect(self._sync_from_view)
@@ -359,6 +381,49 @@ class MainWindow(QMainWindow):
         )
         if path:
             self.open_path(path)
+
+    # ------------------------------------------------------------------ batch
+    def _open_folder_dialog(self) -> None:
+        start = str(self._path.parent) if self._path else ""
+        folder = QFileDialog.getExistingDirectory(self, tr("menu.file.open_folder"), start)
+        if folder:
+            self._scan_folder(Path(folder))
+
+    def _scan_folder(self, folder: Path) -> None:
+        self.batch_reports = batch.scan_folder(
+            folder, self.config.trim_window, self.config.trim_min_q
+        )
+        self.batch_panel.show_reports(self.batch_reports)
+        self.batch_dock.show()
+        self.statusBar().showMessage(tr("batch.scan_done", n=len(self.batch_reports)), 5000)
+
+    def _batch_export(self) -> None:
+        if not self.batch_reports:
+            return
+        out_dir = QFileDialog.getExistingDirectory(self, tr("batch.export_dir"))
+        if not out_dir:
+            return
+        results = batch.batch_export(
+            self.batch_reports,
+            Path(out_dir),
+            window=self.config.trim_window,
+            min_q=self.config.trim_min_q,
+        )
+        exported = sum(1 for _, dest, error in results if dest and not error)
+        errors = sum(1 for _, _, error in results if error)
+        self.statusBar().showMessage(
+            tr("batch.exported", n=exported, err=errors), 8000
+        )
+
+    def _batch_save_csv(self) -> None:
+        if not self.batch_reports:
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, tr("batch.csv"), "batch_summary.csv", "CSV (*.csv)"
+        )
+        if path:
+            export.write_text(path, batch.summary_csv(self.batch_reports))
+            self.statusBar().showMessage(tr("export.done", path=path), 5000)
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # noqa: N802
         urls = event.mimeData().urls()
