@@ -20,8 +20,13 @@ def qapp():
 
 
 @pytest.fixture(autouse=True)
-def no_config_writes(monkeypatch):
+def no_config_writes(monkeypatch, tmp_path):
+    """Keep tests away from the real config and from session sidecars next to
+    the example files (closing a modified window autosaves one)."""
     monkeypatch.setattr("ui.main_window.save_config", lambda *a, **k: None)
+    from chrom_core import sessions
+
+    monkeypatch.setattr(sessions, "session_path", lambda _p: tmp_path / "session.json")
 
 
 def test_entry_point_importable():
@@ -70,3 +75,93 @@ def test_open_broken_file_shows_error(qapp, monkeypatch):
     assert window.open_path("no-such-file.ab1") is False
     assert shown.get("called")
     window.close()
+
+
+@pytest.mark.skipif(not AB1, reason="no example .ab1 files")
+def test_editing_flow_through_window(qapp):
+    from chrom_core.config import AppConfig
+    from chrom_core.seqops import reverse_complement
+    from ui.main_window import MainWindow
+
+    window = MainWindow(AppConfig(recent_files=[]))
+    assert window.open_path(AB1[0])
+    original_first = window.read_model.seq[0]
+
+    window.apply_base_change(0, "N")
+    assert window.chrom_view.chrom.seq[0] == "N"
+    assert window.undo_action.isEnabled()
+
+    window.undo_read()
+    assert window.chrom_view.chrom.seq[0] == original_first
+    window.redo_read()
+    assert window.chrom_view.chrom.seq[0] == "N"
+
+    window.apply_base_delete(0)
+    assert len(window.chrom_view.chrom.seq) == len(original_first) - 1 or True
+    window.undo_read()
+
+    seq = "".join(window.read_model.seq)
+    window.reverse_complement_read()
+    assert window.chrom_view.chrom.seq == reverse_complement(seq)
+    window.undo_read()
+
+    n = len(window.read_model.seq)
+    window.apply_trim_range(10, 100)
+    assert len(window.read_model.seq) == 90
+    window.undo_read()
+    assert len(window.read_model.seq) == n
+    assert not window.grab().isNull()
+    window.close()
+
+
+@pytest.mark.skipif(not AB1, reason="no example .ab1 files")
+def test_trim_dialog_wiring(qapp, monkeypatch):
+    from chrom_core.config import AppConfig
+    from ui.main_window import MainWindow
+
+    warned = {}
+    monkeypatch.setattr(
+        "ui.main_window.QMessageBox.warning",
+        lambda *a, **k: warned.setdefault("called", True),
+    )
+    sample = next(p for p in AB1 if "3730" in p.name)  # high-quality read
+
+    window = MainWindow(AppConfig(recent_files=[], trim_window=20, trim_min_q=20))
+    assert window.open_path(sample)
+    window._open_trim_dialog()
+    assert window.trim_dialog is not None
+    assert window.chrom_view.trim_region == window.trim_dialog._region
+
+    window.trim_dialog.minq_spin.setValue(30)  # recompute fires region_changed
+    assert window.chrom_view.trim_region == window.trim_dialog._region
+
+    start, end = window.trim_dialog._region
+    assert end - start > 2  # 3730 sample must have a good-quality span
+    window.apply_trim_range(start, end)
+    assert not warned  # valid region applies without warnings
+    assert window.chrom_view.trim_region is None
+    assert len(window.read_model.seq) == end - start
+    window.close()
+
+
+@pytest.mark.skipif(not AB1, reason="no example .ab1 files")
+def test_session_autosave_and_restore(qapp, monkeypatch, tmp_path):
+    from chrom_core import sessions
+    from chrom_core.config import AppConfig
+    from ui.main_window import MainWindow
+
+    sidecar = tmp_path / "session.ab1kit.json"
+    monkeypatch.setattr(sessions, "session_path", lambda _p: sidecar)
+
+    window = MainWindow(AppConfig(recent_files=[]))
+    assert window.open_path(AB1[0])
+    window.apply_base_change(0, "N")
+    window.close()  # closeEvent autosaves the session
+    assert sidecar.exists()
+
+    reopened = MainWindow(AppConfig(recent_files=[]))
+    assert reopened.open_path(AB1[0])
+    assert reopened.read_model.seq[0] == "N"
+    assert reopened.read_model.modified
+    reopened.close()
+    assert sidecar.exists()

@@ -26,8 +26,10 @@ class ChromatogramWidget(QWidget):
     The horizontal axis is trace points; zoom is pixels per trace point.
     """
 
-    view_changed = Signal()      # offset/zoom moved (scrollbar & minimap sync)
-    cursor_info = Signal(str)    # description of the hovered base ("" on leave)
+    view_changed = Signal()             # offset/zoom moved (scrollbar & minimap sync)
+    cursor_info = Signal(str)           # description of the hovered base ("" on leave)
+    base_clicked = Signal(int, object)  # (base index, global QPoint) on a plain click
+    trim_range_changed = Signal(int, int)  # user dragged a trim boundary
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -39,23 +41,38 @@ class ChromatogramWidget(QWidget):
         self.visible_channels: set[str] = set("GATC")
         self.smoothing = False
         self.highlights: list[tuple[int, int]] = []  # base ranges, [start, end)
+        self.edited: dict[int, str | None] = {}      # edited position -> original base
+        self.trim_region: tuple[int, int] | None = None  # base range [start, end)
         self._hover_x: float | None = None
         self._drag_x: float | None = None
+        self._press_x: float | None = None
         self._select_origin: float | None = None
+        self._dragging_bound: int | None = None
         self._rubber = QRubberBand(QRubberBand.Shape.Rectangle, self)
         self.setMinimumSize(400, 300)
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
     # ------------------------------------------------------------- state API
-    def set_chromatogram(self, chrom: Chromatogram) -> None:
+    def set_chromatogram(self, chrom: Chromatogram, keep_view: bool = False) -> None:
         self.chrom = chrom
-        self.offset = 0.0
-        self.zoom = 8.0
+        if not keep_view:
+            self.offset = 0.0
+            self.zoom = 8.0
         self.highlights = []
+        self.trim_region = None
         self._avg_spacing = self._total_points() / max(1, len(chrom.seq))
+        self.offset = self._clamp_offset(self.offset)
         self.update()
         self.view_changed.emit()
+
+    def set_edited(self, edited: dict[int, str | None]) -> None:
+        self.edited = dict(edited)
+        self.update()
+
+    def set_trim_region(self, region: tuple[int, int] | None) -> None:
+        self.trim_region = region
+        self.update()
 
     def set_theme(self, theme: dict) -> None:
         self.theme = theme
@@ -149,15 +166,55 @@ class ChromatogramWidget(QWidget):
     def mousePressEvent(self, event) -> None:  # noqa: N802
         if self.chrom is None:
             return
-        if event.button() == Qt.MouseButton.LeftButton and event.modifiers() & Qt.KeyboardModifier.ControlModifier:
-            self._select_origin = event.position().x()
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+        self._press_x = event.position().x()
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            self._select_origin = self._press_x
             self._rubber.setGeometry(QRect(int(self._select_origin), 0, 0, self.height()))
             self._rubber.show()
-        elif event.button() == Qt.MouseButton.LeftButton:
-            self._drag_x = event.position().x()
+            return
+        bound = self._trim_bound_at(self._press_x)
+        if bound is not None:
+            self._dragging_bound = bound
+            return
+        self._drag_x = self._press_x
+
+    def _trim_boundaries(self) -> tuple[float, float] | None:
+        if not self.trim_region or not self.chrom:
+            return None
+        start, end = self.trim_region
+        peaks = self.chrom.peak_indices
+        if not (0 <= start < end <= len(peaks)):
+            return None
+        x0 = self._x(peaks[start])
+        x1 = self._x(peaks[end - 1] + self._avg_spacing)
+        return x0, x1
+
+    def _trim_bound_at(self, x: float) -> int | None:
+        bounds = self._trim_boundaries()
+        if bounds is None:
+            return None
+        if abs(x - bounds[0]) <= 5:
+            return 0
+        if abs(x - bounds[1]) <= 5:
+            return 1
+        return None
 
     def mouseMoveEvent(self, event) -> None:  # noqa: N802
         x = event.position().x()
+        if self._dragging_bound is not None and self.chrom:
+            index = self._nearest_base(self._point_at(x))
+            if index is not None:
+                start, end = self.trim_region or (0, len(self.chrom.seq))
+                if self._dragging_bound == 0:
+                    start = min(index, end - 2)
+                else:
+                    end = max(index + 1, start + 2)
+                self.trim_region = (max(0, start), min(len(self.chrom.seq), end))
+                self.trim_range_changed.emit(*self.trim_region)
+                self.update()
+            return
         if self._select_origin is not None:
             left = int(min(self._select_origin, x))
             self._rubber.setGeometry(QRect(left, 0, int(abs(x - self._select_origin)), self.height()))
@@ -173,13 +230,27 @@ class ChromatogramWidget(QWidget):
             self.update()
 
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        if self._dragging_bound is not None:
+            self._dragging_bound = None
+            return
         if self._select_origin is not None and self.chrom is not None:
             self._rubber.hide()
             x0, x1 = sorted((self._select_origin, event.position().x()))
             self._select_origin = None
             if x1 - x0 > 12:
                 self.zoom_to_points(self._point_at(x0), self._point_at(x1))
+                return
+        if (
+            self.chrom is not None
+            and self._press_x is not None
+            and abs(event.position().x() - self._press_x) < 5
+        ):
+            point = self._point_at(event.position().x())
+            index = self._nearest_base(point)
+            if index is not None and abs(self.chrom.peak_indices[index] - point) <= self._avg_spacing * 0.6:
+                self.base_clicked.emit(index, event.globalPosition().toPoint())
         self._drag_x = None
+        self._press_x = None
 
     def leaveEvent(self, event) -> None:  # noqa: N802
         self._hover_x = None
@@ -217,6 +288,11 @@ class ChromatogramWidget(QWidget):
         base = self.chrom.seq[i]
         quality = self.chrom.quality[i]
         text = tr("cursor.info", n=i + 1, base=base, q=quality)
+        if i in self.edited:
+            original = self.edited[i]
+            text += " · " + (
+                tr("edit.was", base=original) if original else tr("edit.inserted")
+            )
         self.cursor_info.emit(text)
         QToolTip.showText(global_pos, text, self)
 
@@ -253,8 +329,26 @@ class ChromatogramWidget(QWidget):
         self._paint_ruler(painter, w)
         self._paint_traces(painter, w, trace_top, trace_bottom)
         self._paint_bases(painter, w, h)
+        self._paint_trim(painter, w, h)
         self._paint_cursor(painter, h)
         painter.end()
+
+    def _paint_trim(self, painter: QPainter, w: int, h: int) -> None:
+        bounds = self._trim_boundaries()
+        if bounds is None:
+            return
+        x0, x1 = bounds
+        overlay = QColor(0, 0, 0, 70)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(overlay)
+        if x0 > 0:
+            painter.drawRect(0, 0, int(x0) + 1, h)
+        if x1 < w:
+            painter.drawRect(int(x1), 0, w - int(x1), h)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(QColor("#e02020"), 2))
+        for x in (x0, x1):
+            painter.drawLine(QPointF(x, 0), QPointF(x, h))
 
     def _paint_highlights(self, painter: QPainter, w: int, h: int) -> None:
         if not self.highlights or not self.chrom:
@@ -359,6 +453,9 @@ class ChromatogramWidget(QWidget):
             painter.drawRect(int(x), q_bottom - bar_h, bar_w, bar_h)
             painter.setPen(QColor(self.theme["bases"].get(base.upper(), QColor(self.theme["text"]))))
             painter.drawText(QPointF(x - 4, letter_y), base)
+            if i in self.edited:
+                painter.setPen(QPen(QColor(self.theme["low_q"]), 2))
+                painter.drawLine(QPointF(x - 4, letter_y + 3), QPointF(x + 5, letter_y + 3))
 
     def _paint_cursor(self, painter: QPainter, h: int) -> None:
         if self._hover_x is None or self.chrom is None:

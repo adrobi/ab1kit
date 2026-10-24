@@ -6,8 +6,8 @@ import sys
 from importlib.metadata import PackageNotFoundError, version as pkg_version
 from pathlib import Path
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent
+from PySide6.QtCore import QMarginsF, QSizeF, Qt, Signal
+from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent, QPageSize, QPainter, QPdfWriter
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -19,16 +19,20 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QPushButton,
     QScrollBar,
+    QSpinBox,
     QToolBar,
     QVBoxLayout,
     QWidget,
 )
 
-from chrom_core import Chromatogram, read_ab1
+from chrom_core import Chromatogram, EditableRead, read_ab1, trim_window
+from chrom_core import export, sessions
 from chrom_core.config import AppConfig, load_config, save_config
+from chrom_core.editing import INSERT_LETTERS, IUPAC_LETTERS
 from chrom_core.seqops import find_matches
 from i18n import set_language, tr
 from ui.chrom_view import ChromatogramWidget
@@ -63,6 +67,72 @@ class SearchDialog(QDialog):
         return self.reverse_box.isChecked()
 
 
+class TrimDialog(QDialog):
+    """Non-modal quality-trim dialog; preview streams into the chromatogram."""
+
+    region_changed = Signal(int, int)
+    apply_requested = Signal(int, int)
+
+    def __init__(self, quality_fn, window: int, min_q: int, total: int, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(tr("trim.title"))
+        self.quality_fn = quality_fn
+        self.total = total
+        self._region = (0, total)
+
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+        self.window_spin = QSpinBox()
+        self.window_spin.setRange(2, 100)
+        self.window_spin.setValue(window)
+        self.minq_spin = QSpinBox()
+        self.minq_spin.setRange(0, 60)
+        self.minq_spin.setValue(min_q)
+        form.addRow(QLabel(tr("trim.window")), self.window_spin)
+        form.addRow(QLabel(tr("trim.minq")), self.minq_spin)
+        layout.addLayout(form)
+        self.preview = QLabel()
+        layout.addWidget(self.preview)
+        buttons = QWidget()
+        row = QVBoxLayout(buttons)
+        apply_button = QPushButton(tr("trim.apply"))
+        apply_button.setDefault(True)
+        apply_button.clicked.connect(self._apply)
+        close_button = QPushButton(tr("dialog.close"))
+        close_button.clicked.connect(self.close)
+        row.addWidget(apply_button)
+        row.addWidget(close_button)
+        layout.addWidget(buttons)
+
+        self.window_spin.valueChanged.connect(self._recompute)
+        self.minq_spin.valueChanged.connect(self._recompute)
+        self._recompute()
+
+    def window_value(self) -> int:
+        return self.window_spin.value()
+
+    def minq_value(self) -> int:
+        return self.minq_spin.value()
+
+    def _recompute(self) -> None:
+        start, end = trim_window(self.quality_fn(), self.window_spin.value(), self.minq_spin.value())
+        self._set_region(start, end)
+        self.region_changed.emit(start, end)
+
+    def _set_region(self, start: int, end: int) -> None:
+        self._region = (start, end)
+        self.preview.setText(tr("trim.preview", n=end - start, total=self.total))
+
+    def set_region(self, start: int, end: int) -> None:
+        """Sync preview when the user drags trim handles in the view."""
+        self._set_region(start, end)
+
+    def _apply(self) -> None:
+        start, end = self._region
+        self.apply_requested.emit(start, end)
+        self.close()
+
+
 class MainWindow(QMainWindow):
     def __init__(self, config: AppConfig | None = None) -> None:
         super().__init__()
@@ -72,6 +142,8 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("ab1kit")
         self.resize(1200, 780)
         self._path: Path | None = None
+        self.read_model: EditableRead | None = None
+        self.trim_dialog: TrimDialog | None = None
         self._search_ranges: list[tuple[int, int]] = []
         self._search_pos = -1
 
@@ -129,11 +201,31 @@ class MainWindow(QMainWindow):
 
     def _build_menus(self) -> None:
         file_menu = self.menuBar().addMenu(tr("menu.file"))
+        self._file_menu = file_menu
         open_action = QAction(tr("menu.file.open"), self)
         open_action.setShortcut("Ctrl+O")
         open_action.triggered.connect(self._open_dialog)
         file_menu.addAction(open_action)
         self.recent_menu = file_menu.addMenu(tr("menu.file.recent"))
+        save_session = QAction(tr("menu.file.save_session"), self)
+        save_session.setShortcut("Ctrl+S")
+        save_session.triggered.connect(self._save_session)
+        file_menu.addAction(save_session)
+        export_menu = file_menu.addMenu(tr("menu.file.export"))
+        for text, slot in (
+            (tr("menu.file.export_fasta"), self._export_fasta),
+            (tr("menu.file.export_fastq"), self._export_fastq),
+            (tr("menu.file.export_png"), self._export_png),
+            (tr("menu.file.export_pdf"), self._export_pdf),
+        ):
+            action = QAction(text, self)
+            action.triggered.connect(slot)
+            export_menu.addAction(action)
+        file_menu.addSeparator()
+        copy_action = QAction(tr("menu.file.copy_seq"), self)
+        copy_action.setShortcut("Ctrl+Shift+C")
+        copy_action.triggered.connect(self._copy_sequence)
+        file_menu.addAction(copy_action)
         file_menu.addSeparator()
         exit_action = QAction(tr("menu.file.exit"), self)
         exit_action.setShortcut("Ctrl+Q")
@@ -141,6 +233,17 @@ class MainWindow(QMainWindow):
         file_menu.addAction(exit_action)
 
         edit_menu = self.menuBar().addMenu(tr("menu.edit"))
+        self.undo_action = QAction(tr("menu.edit.undo"), self)
+        self.undo_action.setShortcut("Ctrl+Z")
+        self.undo_action.triggered.connect(self.undo_read)
+        self.undo_action.setEnabled(False)
+        edit_menu.addAction(self.undo_action)
+        self.redo_action = QAction(tr("menu.edit.redo"), self)
+        self.redo_action.setShortcut("Ctrl+Y")
+        self.redo_action.triggered.connect(self.redo_read)
+        self.redo_action.setEnabled(False)
+        edit_menu.addAction(self.redo_action)
+        edit_menu.addSeparator()
         find_action = QAction(tr("menu.edit.find"), self)
         find_action.setShortcut("Ctrl+F")
         find_action.triggered.connect(self._search)
@@ -153,6 +256,15 @@ class MainWindow(QMainWindow):
         goto_action.setShortcut("Ctrl+G")
         goto_action.triggered.connect(self._goto)
         edit_menu.addAction(goto_action)
+        edit_menu.addSeparator()
+        revcomp_action = QAction(tr("menu.edit.revcomp"), self)
+        revcomp_action.setShortcut("Ctrl+R")
+        revcomp_action.triggered.connect(self.reverse_complement_read)
+        edit_menu.addAction(revcomp_action)
+        trim_action = QAction(tr("menu.edit.trim"), self)
+        trim_action.setShortcut("Ctrl+T")
+        trim_action.triggered.connect(self._open_trim_dialog)
+        edit_menu.addAction(trim_action)
 
         view_menu = self.menuBar().addMenu(tr("menu.view"))
         self.dark_action = QAction(tr("menu.view.dark_theme"), self)
@@ -192,6 +304,7 @@ class MainWindow(QMainWindow):
     def _connect(self) -> None:
         self.chrom_view.view_changed.connect(self._sync_from_view)
         self.chrom_view.cursor_info.connect(self.statusBar().showMessage)
+        self.chrom_view.base_clicked.connect(self._on_base_clicked)
         self.minimap.request_center.connect(self.chrom_view.center_on_point)
         self.scrollbar.valueChanged.connect(
             lambda value: self.chrom_view.set_offset(float(value))
@@ -205,16 +318,36 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, tr("err.open_failed"), f"{path}:\n{exc}")
             return False
         self._path = Path(path)
-        self.chrom_view.set_chromatogram(chrom)
-        self.minimap.set_chromatogram(chrom)
+        model = EditableRead(chrom)
+        restored = self._try_restore_session(model)
+        self.read_model = model
         self._search_ranges = []
         self._search_pos = -1
-        self.setWindowTitle(f"ab1kit — {self._path.name}")
+        self.chrom_view.set_chromatogram(model.current())
+        self.chrom_view.set_edited(model.edited)
+        self.minimap.set_chromatogram(model.current())
+        self.minimap.set_highlights([])
         self._push_recent(str(self._path))
-        self._refresh_info(chrom)
-        n = len(chrom.seq)
-        mean_q = sum(chrom.quality) / max(1, len(chrom.quality))
-        self.statusBar().showMessage(tr("status.file", n=n, q=mean_q), 5000)
+        self._refresh_info(model.current())
+        self._sync_actions()
+        n = len(model.seq)
+        mean_q = sum(model.quality) / max(1, n)
+        message = tr("status.file", n=n, q=mean_q)
+        if restored:
+            message += " · " + tr("session.loaded")
+        self.statusBar().showMessage(message, 8000)
+        self.setWindowTitle(f"ab1kit — {self._path.name}" + ("*" if model.modified else ""))
+        return True
+
+    def _try_restore_session(self, model: EditableRead) -> bool:
+        sidecar = sessions.session_path(self._path)
+        data = sessions.load_session(sidecar)
+        if not data or data.get("source") != self._path.name:
+            return False
+        try:
+            model.restore_state(data)
+        except (KeyError, TypeError, ValueError):
+            return False
         return True
 
     def _open_dialog(self) -> None:
@@ -277,6 +410,126 @@ class MainWindow(QMainWindow):
             )
         QApplication.instance().setStyleSheet(app_qss(name == "dark"))
         save_config(self.config)
+
+    # --------------------------------------------------------------- editing
+    def _sync_actions(self) -> None:
+        model = self.read_model
+        self.undo_action.setEnabled(bool(model and model.can_undo))
+        self.redo_action.setEnabled(bool(model and model.can_redo))
+
+    def refresh_read(self) -> None:
+        if self.read_model is None:
+            return
+        chrom = self.read_model.current()
+        self.chrom_view.set_chromatogram(chrom, keep_view=True)
+        self.chrom_view.set_edited(self.read_model.edited)
+        self.minimap.set_chromatogram(chrom)
+        self.minimap.set_highlights([])
+        self._search_ranges = []
+        self._search_pos = -1
+        self._refresh_info(chrom)
+        self._sync_actions()
+        self.setWindowTitle(
+            f"ab1kit — {self._path.name}" + ("*" if self.read_model.modified else "")
+        )
+
+    def apply_base_change(self, index: int, base: str) -> None:
+        if self.read_model:
+            self.read_model.set_base(index, base)
+            self.refresh_read()
+
+    def apply_base_insert(self, index: int, base: str) -> None:
+        if self.read_model:
+            self.read_model.insert_base(index, base)
+            self.refresh_read()
+
+    def apply_base_delete(self, index: int) -> None:
+        if self.read_model:
+            self.read_model.delete_base(index)
+            self.refresh_read()
+
+    def apply_trim_range(self, start: int, end: int) -> None:
+        if not self.read_model:
+            return
+        try:
+            self.read_model.apply_trim(start, end)
+        except ValueError as exc:
+            QMessageBox.warning(self, tr("trim.title"), str(exc))
+            return
+        self.chrom_view.set_trim_region(None)
+        self.refresh_read()
+        self.statusBar().showMessage(tr("trim.status", n=len(self.read_model.seq)))
+
+    def undo_read(self) -> None:
+        if self.read_model and self.read_model.undo():
+            self.refresh_read()
+
+    def redo_read(self) -> None:
+        if self.read_model and self.read_model.redo():
+            self.refresh_read()
+
+    def reverse_complement_read(self) -> None:
+        if self.read_model:
+            self.read_model.reverse_complement()
+            self.refresh_read()
+
+    def _on_base_clicked(self, index: int, global_pos) -> None:
+        if self.read_model is None:
+            return
+        menu = QMenu(self)
+        change = menu.addMenu(tr("edit.change"))
+        for letter in IUPAC_LETTERS:
+            change.addAction(letter, lambda l=letter: self.apply_base_change(index, l))
+        insert_left = menu.addMenu(tr("edit.insert_left"))
+        for letter in INSERT_LETTERS:
+            insert_left.addAction(letter, lambda l=letter: self.apply_base_insert(index, l))
+        insert_right = menu.addMenu(tr("edit.insert_right"))
+        for letter in INSERT_LETTERS:
+            insert_right.addAction(letter, lambda l=letter: self.apply_base_insert(index + 1, l))
+        menu.addSeparator()
+        menu.addAction(tr("edit.delete"), lambda: self.apply_base_delete(index))
+        menu.exec(global_pos)
+
+    # ------------------------------------------------------------------ trim
+    def _open_trim_dialog(self) -> None:
+        if self.read_model is None or self.trim_dialog is not None:
+            return
+        start, end = trim_window(
+            self.read_model.quality, self.config.trim_window, self.config.trim_min_q
+        )
+        self.chrom_view.set_trim_region((start, end))
+        dialog = TrimDialog(
+            lambda: self.read_model.quality,
+            self.config.trim_window,
+            self.config.trim_min_q,
+            len(self.read_model.seq),
+            self,
+        )
+        self.trim_dialog = dialog
+        dialog.region_changed.connect(
+            lambda start, end: self.chrom_view.set_trim_region((start, end))
+        )
+        self.chrom_view.trim_range_changed.connect(dialog.set_region)
+        dialog.apply_requested.connect(self._apply_trim_from_dialog)
+        dialog.finished.connect(self._trim_dialog_closed)
+        dialog.show()
+
+    def _apply_trim_from_dialog(self, start: int, end: int) -> None:
+        if self.trim_dialog is not None:
+            self.config.trim_window = self.trim_dialog.window_value()
+            self.config.trim_min_q = self.trim_dialog.minq_value()
+            save_config(self.config)
+        self.apply_trim_range(start, end)
+
+    def _trim_dialog_closed(self) -> None:
+        dialog = self.trim_dialog
+        self.trim_dialog = None
+        if dialog is not None:
+            try:
+                self.chrom_view.trim_range_changed.disconnect(dialog.set_region)
+            except RuntimeError:
+                pass
+        self.chrom_view.set_trim_region(None)
 
     # ---------------------------------------------------------------- search
     def _search(self) -> None:
@@ -354,11 +607,88 @@ class MainWindow(QMainWindow):
                 row(tr(label_key), chrom.metadata[key])
         self.info_dock.setWidget(page)
 
+    # ------------------------------------------------------- export and sessions
+    def _export_target(self, caption: str, suffix: str, pattern: str) -> str | None:
+        default = (self._path.stem if self._path else "read") + suffix
+        path, _ = QFileDialog.getSaveFileName(self, caption, default, pattern)
+        return path or None
+
+    def _export_fasta(self) -> None:
+        if not self.read_model:
+            return
+        path = self._export_target(tr("menu.file.export_fasta"), ".fasta", "FASTA (*.fasta)")
+        if path:
+            export.write_text(path, export.to_fasta(self._export_id(), "".join(self.read_model.seq)))
+            self.statusBar().showMessage(tr("export.done", path=path), 5000)
+
+    def _export_fastq(self) -> None:
+        if not self.read_model:
+            return
+        path = self._export_target(tr("menu.file.export_fastq"), ".fastq", "FASTQ (*.fastq)")
+        if path:
+            content = export.to_fastq(
+                self._export_id(), "".join(self.read_model.seq), self.read_model.quality
+            )
+            export.write_text(path, content)
+            self.statusBar().showMessage(tr("export.done", path=path), 5000)
+
+    def _export_id(self) -> str:
+        return self.read_model.current().sample_id if self.read_model else "read"
+
+    def _export_png(self) -> None:
+        path = self._export_target(tr("menu.file.export_png"), ".png", "PNG (*.png)")
+        if path and self.chrom_view.grab().save(path):
+            self.statusBar().showMessage(tr("export.done", path=path), 5000)
+
+    def _export_pdf(self) -> None:
+        path = self._export_target(tr("menu.file.export_pdf"), ".pdf", "PDF (*.pdf)")
+        if not path:
+            return
+        pixmap = self.chrom_view.grab()
+        writer = QPdfWriter(path)
+        writer.setPageSize(QPageSize(QSizeF(pixmap.width(), pixmap.height()), QPageSize.Unit.Point))
+        writer.setPageMargins(QMarginsF(0, 0, 0, 0))
+        painter = QPainter(writer)
+        painter.drawPixmap(0, 0, writer.width(), writer.height(), pixmap)
+        painter.end()
+        self.statusBar().showMessage(tr("export.done", path=path), 5000)
+
+    def _copy_sequence(self) -> None:
+        if self.read_model:
+            QApplication.clipboard().setText("".join(self.read_model.seq))
+            self.statusBar().showMessage(
+                tr("copy.done", n=len(self.read_model.seq)), 3000
+            )
+
+    def _save_session(self) -> None:
+        if self.read_model is None or self._path is None:
+            return
+        sessions.save_session(
+            sessions.session_path(self._path),
+            {"source": self._path.name, **self.read_model.to_dict()},
+        )
+        self.statusBar().showMessage(tr("session.saved"), 3000)
+
+    def closeEvent(self, event) -> None:  # noqa: N802
+        if self.read_model is not None and self._path is not None:
+            sidecar = sessions.session_path(self._path)
+            try:
+                if self.read_model.modified:
+                    sessions.save_session(
+                        sidecar, {"source": self._path.name, **self.read_model.to_dict()}
+                    )
+                elif sidecar.exists():
+                    sidecar.unlink()
+            except OSError:
+                pass
+        super().closeEvent(event)
+
 
 def run(argv: list[str] | None = None) -> int:
     """Application entry point used by the ``ab1kit`` console script."""
     args = list(sys.argv[1:] if argv is None else argv)
     app = QApplication(args)
+    app.setStyle("Fusion")  # chrome identical on every platform and OS theme
     window = MainWindow()
     window.show()
     for arg in args:

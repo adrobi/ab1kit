@@ -8,4 +8,5 @@ build/
 dist/
 *.spec
 .DS_Store
+*.ab1kit.json
 /PLAN.md
