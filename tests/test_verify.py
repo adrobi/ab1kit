@@ -170,6 +170,64 @@ def test_ref_mismatch(setup) -> None:
     assert verdicts[0].observed == reference[50]
 
 
+def test_ref_mismatch_carries_note_code(setup) -> None:
+    reference = setup
+    wrong_ref = "A" if reference[50] != "A" else "C"
+    verdicts, _ = _verify(reference, reference, [ExpectedVariant(51, wrong_ref, "T")])
+    assert verdicts[0].note_code == "ref_differs"
+    assert verdicts[0].note  # English text stays for CSV/XLSX
+
+
+def test_other_note_codes(setup) -> None:
+    reference = setup
+    verdicts, _ = _verify(reference, reference, [ExpectedVariant(51, "AT", "GC")])
+    assert verdicts[0].note_code == "only_snv"
+    verdicts, _ = _verify(reference, reference, [ExpectedVariant(5000, ".", "A")])
+    assert verdicts[0].note_code == "pos_outside_ref"
+    read = reference[:40] + reference[60:]
+    verdicts, _ = _verify(reference, read, [ExpectedVariant(51, reference[50], "A")])
+    assert verdicts[0].note_code == "deleted_in_read"
+    alt = "T" if reference[50] != "T" else "A"
+    chrom = make_chrom(confirmed_case(reference, 50, alt), quality=10)
+    verdicts, _ = _verify(reference, confirmed_case(reference, 50, alt),
+                          [ExpectedVariant(51, reference[50], alt)], chrom=chrom)
+    assert verdicts[0].note_code == "low_q"
+    assert verdicts[0].note_args == {"q": 10, "min_q": 20}
+
+
+_COMP = {"A": "T", "C": "G", "G": "C", "T": "A"}
+
+
+@pytest.mark.parametrize("name", ["Achl_ACHLO006-09_1_F.ab1", "Achl_ACHLO006-09_2_R.ab1"])
+def test_real_read_confirmed_on_both_strands(name) -> None:
+    from clone_fixtures import real_read, reference_for
+
+    chrom = real_read(name)
+    reference = reference_for(name)
+    alignment = align_read("".join(chrom.seq), reference)
+    assert alignment.strand == ("-" if name.endswith("_R.ab1") else "+")
+    n = len(chrom.seq)
+    checked = 0
+    for pos, oriented_idx in sorted(alignment.ref_to_read.items()):
+        if pos < 100:
+            continue
+        idx = oriented_idx if alignment.strand == "+" else n - 1 - oriented_idx
+        if chrom.quality[idx] < 30 or chrom.seq[idx].upper() not in "ACGT":
+            continue
+        base = chrom.seq[idx].upper()
+        ref_strand = base if alignment.strand == "+" else _COMP[base]
+        verdict = verify_expected(
+            alignment, chrom, reference, [ExpectedVariant(pos + 1, ".", ref_strand)]
+        )[0]
+        assert verdict.verdict == "confirmed", (pos, verdict)
+        assert verdict.observed == ref_strand
+        assert verdict.read_pos == idx
+        checked += 1
+        if checked >= 40:
+            break
+    assert checked == 40
+
+
 def test_low_quality(setup) -> None:
     reference = setup
     read = confirmed_case(reference, 50, "T" if reference[50] != "T" else "A")

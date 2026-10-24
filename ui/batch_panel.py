@@ -73,7 +73,10 @@ class BatchPanel(QWidget):
         for row, report in enumerate(reports):
             self._set_item(row, 0, report.path.name, data=str(report.path))
             self._set_item(row, 1, report.length if not report.error else "")
-            self._set_item(row, 2, report.mean_q if not report.error else "")
+            self._set_item(
+                row, 2,
+                "" if report.error else "—" if report.mean_q is None else report.mean_q,
+            )
             self._set_item(row, 3, report.q20 if not report.error else "")
             self._set_item(row, 4, report.trimmed_length if not report.error else "")
             status = QTableWidgetItem(STATUS_TEXT[report.status])

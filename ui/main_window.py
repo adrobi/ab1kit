@@ -41,7 +41,7 @@ from chrom_core.config import AppConfig, load_config, save_config
 from chrom_core.editing import INSERT_LETTERS, IUPAC_LETTERS
 from chrom_core.snps import call_snps
 from chrom_core.verify import parse_expected, verify_expected, verdicts_csv, verdicts_xlsx
-from chrom_core.seqops import find_matches
+from chrom_core.seqops import find_matches, reverse_complement
 from i18n import set_language, tr
 from ui.batch_panel import BatchPanel
 from ui.chrom_view import ChromatogramWidget
@@ -536,6 +536,28 @@ class MainWindow(QMainWindow):
         else:
             self.statusBar().showMessage(tr("analysis.need_read"), 5000)
 
+    def _reference_overlay(self) -> tuple[str, dict[int, int]]:
+        """Reference letters and ref -> index mapping in the *displayed* read's
+        orientation (the alignment indexes the reverse complement on '-')."""
+        alignment = self.alignment
+        if alignment.strand == "+":
+            return self.reference_seq, alignment.ref_to_read
+        n = len(self.read_model.seq)
+        return (
+            reverse_complement(self.reference_seq)[::-1],  # complement, same ref indexing
+            {pos: n - 1 - idx for pos, idx in alignment.ref_to_read.items()},
+        )
+
+    def _displayed_diff_index(self, diff) -> int | None:
+        """0-based index of ``diff`` in the displayed read (None for deletions)."""
+        if diff.read_pos is None:
+            return None
+        if self.alignment.strand == "+":
+            return diff.read_pos
+        n = len(self.read_model.seq)
+        span = len(diff.read_base) if diff.kind == "insertion" else 1
+        return n - diff.read_pos - span
+
     def _clear_reference(self) -> None:
         self.reference_seq = ""
         self.alignment = None
@@ -552,7 +574,8 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, tr("analysis.ref.title"), str(exc))
             self._clear_reference()
             return
-        self.chrom_view.set_reference(self.reference_seq, self.alignment.ref_to_read)
+        letters, ref_to_read = self._reference_overlay()
+        self.chrom_view.set_reference(letters, ref_to_read)
         chrom = self.read_model.current()
         self.snp_calls = call_snps(
             self.alignment, chrom,
@@ -612,7 +635,8 @@ class MainWindow(QMainWindow):
                 diff.ref_base,
                 diff.read_base,
                 (call.read_pos + 1 if call is not None
-                 else diff.read_pos + 1 if diff.read_pos is not None else ""),
+                 else shown + 1 if (shown := self._displayed_diff_index(diff)) is not None
+                 else ""),
                 verdict,
                 call.quality if call is not None else "",
                 f"{call.ratio:.2f}" if call is not None and call.ratio is not None else "",
@@ -745,7 +769,7 @@ class MainWindow(QMainWindow):
                 labels.get(v.verdict, v.verdict),
                 v.observed,
                 v.quality if v.quality is not None else "",
-                v.note,
+                tr(f"verify.note.{v.note_code}", **v.note_args) if v.note_code else v.note,
             ]
             for col, value in enumerate(values):
                 item = QTableWidgetItem()

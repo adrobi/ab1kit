@@ -101,3 +101,14 @@ def test_summary_csv(folder: Path) -> None:
 def test_csv_field_quoting() -> None:
     assert batch._csv_field("plain") == "plain"
     assert batch._csv_field('a"b;c') == '"a""b;c"'
+
+
+def test_read_without_quality_reports_none_mean_q(folder: Path) -> None:
+    by_name = {r.path.name: r for r in batch.scan_folder(folder)}
+    assert by_name["310.ab1"].mean_q is None
+    assert by_name["3730.ab1"].mean_q is not None
+    row = next(
+        line for line in batch.summary_csv(list(by_name.values())).splitlines()
+        if line.startswith("310.ab1")
+    )
+    assert row.split(";")[2] == ""

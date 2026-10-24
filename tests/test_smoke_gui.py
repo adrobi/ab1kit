@@ -287,3 +287,53 @@ def test_session_autosave_and_restore(qapp, monkeypatch, tmp_path):
     assert reopened.read_model.modified
     reopened.close()
     assert sidecar.exists()
+
+
+def test_verify_table_note_is_localised(qapp):
+    import i18n
+    from chrom_core.config import AppConfig
+    from i18n import tr
+    from ui.main_window import MainWindow
+
+    sample = next(p for p in AB1 if "3730" in p.name)
+    i18n.set_language("ru")
+    try:
+        window = MainWindow(AppConfig(recent_files=[], language="ru"))
+        assert window.open_path(sample)
+        seq = "".join(window.read_model.seq)
+        ref = seq[100:400]
+        window._set_reference_seq(ref)
+        wrong = "A" if ref[50] != "A" else "C"
+        window._verify_variants(f"name;pos;ref;alt\nsnp;51;{wrong};T\n")
+        note_cell_text = window.verify_table.item(0, 7).text()
+        assert "table ref base" not in note_cell_text
+        assert note_cell_text == tr("verify.note.ref_differs")
+        window.close()
+    finally:
+        i18n.set_language("ru")
+
+
+def test_reverse_read_reference_overlay_in_displayed_orientation(qapp):
+    from chrom_core.config import AppConfig
+    from clone_fixtures import DATA, reference_for
+    from ui.main_window import MainWindow
+
+    name = "Achl_ACHLO006-09_2_R.ab1"
+    window = MainWindow(AppConfig(recent_files=[]))
+    assert window.open_path(DATA / "real" / name)
+    window._set_reference_seq(reference_for(name))
+    assert window.alignment.strand == "-"
+
+    letters, mapping = window.chrom_view.reference
+    seq = window.read_model.seq
+    assert mapping and all(0 <= idx < len(seq) for idx in mapping.values())
+    matches = sum(letters[pos].upper() == seq[idx].upper() for pos, idx in mapping.items())
+    assert matches / len(mapping) > 0.9
+
+    # the "№ базы" column shows displayed 1-based indices
+    for row in range(window.diff_table.rowCount()):
+        shown = window.diff_table.item(row, 4).text()
+        ref_pos = int(window.diff_table.item(row, 0).text()) - 1
+        if shown and ref_pos in mapping:
+            assert int(shown) - 1 == mapping[ref_pos]
+    window.close()

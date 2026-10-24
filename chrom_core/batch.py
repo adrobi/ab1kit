@@ -19,7 +19,7 @@ MIN_OK_MEAN_Q = 25.0   # mean quality required for "ok"
 class FileReport:
     path: Path
     length: int = 0
-    mean_q: float = 0.0
+    mean_q: float | None = 0.0  # None: the read carries no quality values (all Q = 0)
     q20: int = 0
     trim_start: int = 0
     trim_end: int = 0
@@ -34,7 +34,10 @@ class FileReport:
         """One of 'ok', 'warn', 'bad', 'error'."""
         if self.error:
             return "error"
-        if self.trimmed_length >= MIN_OK_LENGTH and self.mean_q >= MIN_OK_MEAN_Q:
+        if (
+            self.trimmed_length >= MIN_OK_LENGTH
+            and (self.mean_q or 0.0) >= MIN_OK_MEAN_Q
+        ):
             return "ok"
         if self.trimmed_length >= MIN_WARN_LENGTH:
             return "warn"
@@ -56,7 +59,11 @@ def scan_folder(folder: str | Path, window: int = 20, min_q: int = 20) -> list[F
             FileReport(
                 path=path,
                 length=len(chrom.seq),
-                mean_q=round(sum(chrom.quality) / max(1, len(chrom.quality)), 1),
+                mean_q=(
+                    round(sum(chrom.quality) / len(chrom.quality), 1)
+                    if any(chrom.quality)
+                    else None
+                ),
                 q20=sum(1 for q in chrom.quality if q >= 20),
                 trim_start=start,
                 trim_end=end,
@@ -130,7 +137,7 @@ def summary_csv(reports: list[FileReport]) -> str:
                 for value in (
                     report.path.name,
                     report.length,
-                    report.mean_q,
+                    "" if report.mean_q is None else report.mean_q,
                     report.q20,
                     report.trimmed_length,
                     report.status,
