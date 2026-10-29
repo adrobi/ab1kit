@@ -21,6 +21,8 @@ from tests.clone_fixtures import REAL_READS
     ("A05_K3-F", ("K3", "F")),
     ("clone12.rev", ("clone12", "rev")),
     ("клон 14_SP6", ("клон 14", "SP6")),
+    ("B2_F", ("B2", "F")),                # lone well-shaped token is the clone
+    ("A1_F", ("A1", "F")),
     ("T7", None),
 ])
 def test_parse_name(stem, expected):

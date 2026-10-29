@@ -82,7 +82,14 @@ class Grouping:
 def parse_name(
     stem: str, primer_tokens: Iterable[str] = DEFAULT_PRIMER_TOKENS
 ) -> tuple[str, str] | None:
-    """Split a file stem into ``(clone, primer)``; ``None`` if no clone remains."""
+    """Split a file stem into ``(clone, primer)``; ``None`` if no clone remains.
+
+    The primer is the last dictionary token (else the last token). The clone is
+    the text before it, minus trailing separators, a lone digit (primer order)
+    and a leading plate well (``A05``) -- the well is stripped only when another
+    clone token follows it, so ``B2_F`` is clone ``B2``. Anything after the
+    primer (e.g. a repeat suffix ``_2``) is ignored.
+    """
     tokens = list(_TOKEN_RE.finditer(stem))
     if not tokens:
         return None
@@ -103,7 +110,8 @@ def parse_name(
     clone = re.sub(f"{_SEP}+$", "", stem[:start])
     clone = re.sub(rf"(?:^|{_SEP})\d$", "", clone)          # primer order number
     clone = re.sub(f"{_SEP}+$", "", clone)
-    clone = re.sub(rf"^{_WELL_RE.pattern}(?:{_SEP}+|$)", "", clone)  # plate well
+    # leading plate well, only if another clone token follows it
+    clone = re.sub(rf"^{_WELL_RE.pattern}{_SEP}+(?=[^_\-. ])", "", clone)
     clone = re.sub(f"^{_SEP}+", "", clone)
     return (clone, primer) if clone else None
 
