@@ -7,6 +7,8 @@ import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from .clones import DEFAULT_PRIMER_TOKENS
+
 
 @dataclass
 class AppConfig:
@@ -17,6 +19,8 @@ class AppConfig:
     theme: str = "light"        # "light" | "dark"
     language: str = "ru"        # "ru" | "en"
     recent_files: list[str] = field(default_factory=list)
+    primer_tokens: list[str] = field(default_factory=lambda: list(DEFAULT_PRIMER_TOKENS))
+    group_pattern: str = ""  # regex with named groups clone/primer; "" = by file name
 
 
 def config_dir() -> Path:
