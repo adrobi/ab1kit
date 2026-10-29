@@ -12,6 +12,7 @@ from chrom_core import sessions
 from chrom_core.abif import Chromatogram, read_ab1
 from chrom_core.align import Difference, ReadAlignment, align_to_construct
 from chrom_core.editing import EditableRead
+from chrom_core.effects import difference_effect
 from chrom_core.peaks import scan_secondary_peaks
 from chrom_core.reference import Construct
 from chrom_core.seqops import iupac_compatible, reverse_complement
@@ -377,11 +378,12 @@ def verify_clone(
     region: Region | None,
     reads: list[ReadRef],
     params: VerifyParams = VerifyParams(),
-    annotate=None,
+    annotate=difference_effect,
 ) -> CloneReport:
     """Check one colony's reads against ``construct`` within ``region``.
 
-    ``annotate(construct, difference) -> str`` fills ``CloneDifference.effect``.
+    ``annotate(construct, difference) -> str`` fills ``CloneDifference.effect``
+    (default: ``difference_effect``; ``None`` leaves it empty).
     """
     L = len(construct.seq)
     positions = region_positions(_check_region(region, L, construct.circular), L)
@@ -461,6 +463,7 @@ def verify_all(
     params: VerifyParams = VerifyParams(),
     progress=None,
     cancelled=None,
+    annotate=difference_effect,
 ) -> list[CloneReport]:
     """``verify_clone`` for every clone of ``grouping``, in natural name order.
 
@@ -474,7 +477,7 @@ def verify_all(
     for done, reads in enumerate(groups.values(), start=1):
         if cancelled is not None and cancelled():
             raise CancelledError()
-        reports.append(verify_clone(construct, region, reads, params))
+        reports.append(verify_clone(construct, region, reads, params, annotate))
         if progress is not None:
             progress(done, len(groups))
     return reports
