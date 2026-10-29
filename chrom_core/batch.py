@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from chrom_core import read_ab1, trim_window
-from chrom_core import sessions
+from chrom_core.clones import load_read
 from chrom_core.editing import EditableRead
 from chrom_core.export import to_fasta, to_fastq, write_text
 
@@ -72,18 +72,6 @@ def scan_folder(folder: str | Path, window: int = 20, min_q: int = 20) -> list[F
     return reports
 
 
-def _edited_read(path: Path) -> EditableRead:
-    """Parse a file and apply its editing session sidecar when present."""
-    model = EditableRead(read_ab1(path))
-    data = sessions.load_session(sessions.session_path(path))
-    if data and data.get("source") == path.name:
-        try:
-            model.restore_state(data)
-        except (KeyError, TypeError, ValueError):
-            pass
-    return model
-
-
 def batch_export(
     reports: list[FileReport],
     out_dir: str | Path,
@@ -102,7 +90,7 @@ def batch_export(
         dest: Path | None = None
         error = ""
         try:
-            model = _edited_read(report.path)
+            model = EditableRead(load_read(report.path))
             start, end = trim_window(model.quality, window=window, min_q=min_q)
             if end - start >= 2:
                 model.apply_trim(start, end)

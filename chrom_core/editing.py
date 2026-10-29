@@ -120,9 +120,9 @@ class EditableRead:
         n = len(self.seq)
         self.seq = list(reverse_complement("".join(self.seq)))
         self.quality.reverse()
-        if self.peaks:
-            last = self.peaks[-1]
-            self.peaks = [last - p for p in reversed(self.peaks)]
+        # current() reverses the traces over their full length: map peaks the same way
+        last = len(next(iter(self.original.traces.values()))) - 1
+        self.peaks = [last - p for p in reversed(self.peaks)]
         self.edited = {n - 1 - k: v for k, v in self.edited.items()}
         self.reversed_complement = not self.reversed_complement
 

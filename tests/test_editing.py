@@ -65,10 +65,14 @@ def test_reverse_complement(model: EditableRead) -> None:
     chrom = model.current()
     # flipped traces: A channel is original T channel reversed
     assert chrom.traces["A"] == tuple(reversed(model.original.traces["T"]))
-    # rc twice restores sequence and quality
+    # peaks follow the flipped traces (reversed over the full trace length)
+    last = len(model.original.traces["A"]) - 1
+    assert chrom.peak_indices == tuple(last - p for p in reversed(model.original.peak_indices))
+    # rc twice restores sequence, quality and peaks
     model.reverse_complement()
     assert "".join(model.seq) == seq
     assert model.quality == list(model.original.quality)
+    assert model.peaks == list(model.original.peak_indices)
     assert not model.reversed_complement
 
 

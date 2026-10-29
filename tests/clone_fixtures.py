@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import shutil
+import struct
+from dataclasses import replace
+from functools import cache
 from pathlib import Path
 
 from Bio import SeqIO
 
-from chrom_core import read_ab1
-from chrom_core.abif import Chromatogram
+from chrom_core import read_ab1, sessions
+from chrom_core.abif import DEFAULT_DYE_ORDER, Chromatogram
+from chrom_core.peaks import channel_baseline, peak_window
 from chrom_core.seqops import IUPAC
 
 DATA = Path(__file__).resolve().parent / "data"
@@ -83,3 +88,97 @@ def make_chrom(
         traces={b: tuple(t) for b, t in traces.items()},
         peak_indices=tuple(peaks),
     )
+
+
+# ---------------------------------------------------------------- semi-synthetic
+
+
+def mutate(seq: str, pos: int, kind: str, base: str = "") -> str:
+    """``seq`` with a substitution / insertion (before ``pos``) / deletion at ``pos``."""
+    if kind == "sub":
+        return seq[:pos] + base + seq[pos + 1:]
+    if kind == "ins":
+        return seq[:pos] + base + seq[pos:]
+    if kind == "del":
+        return seq[:pos] + seq[pos + 1:]
+    raise ValueError(kind)
+
+
+def with_secondary_peak(chrom: Chromatogram, index: int, base: str, ratio: float) -> Chromatogram:
+    """Add a second peak in channel ``base`` under called base ``index``.
+
+    The called peak's shape is copied into ``base`` (so it is a real local
+    maximum, as ``peaks`` measures it), scaled so the *dye-normalised*
+    secondary/primary ratio is ``ratio``.
+    """
+    called = chrom.seq[index].upper()
+    baseline = channel_baseline(chrom, index)
+    scale = ratio * baseline[base] / baseline[called]
+    centre = chrom.peak_indices[index]
+    window = peak_window(chrom, index)
+    source = chrom.traces[called]
+    trace = list(chrom.traces[base])
+    for k in range(max(0, centre - window + 1), min(len(trace), centre + window)):
+        trace[k] = max(trace[k], round(source[k] * scale))
+    traces = dict(chrom.traces)
+    traces[base] = tuple(trace)
+    return replace(chrom, traces=traces)
+
+
+@cache
+def _source_by_sample_id() -> dict[str, Path]:
+    return {read_ab1(p).sample_id: p for p in REAL_READS}
+
+_DYE_OF = {base: tag for tag, base in DEFAULT_DYE_ORDER.items()}
+_RC_CHANNEL = {"A": "T", "T": "A", "C": "G", "G": "C"}
+
+
+def _flip(traces: dict[str, tuple[int, ...]]) -> dict[str, tuple[int, ...]]:
+    """Display traces of a reverse-complemented read <-> file traces."""
+    return {b: tuple(reversed(traces[_RC_CHANNEL[b]])) for b in traces}
+
+
+def _mismatches(a: dict, b: dict) -> int:
+    return sum(x != y for base in a for x, y in zip(a[base], b[base]))
+
+
+def _patch_traces(path: Path, traces: dict[str, tuple[int, ...]]) -> None:
+    """Overwrite the DATA9-12 dye channels of an ABIF file in place (same lengths)."""
+    data = bytearray(path.read_bytes())
+    _, _, _, _, count, _, offset = struct.unpack(">4siHHiii", data[6:30])
+    wanted = {_DYE_OF[b]: values for b, values in traces.items()}
+    for e in range(count):
+        entry = offset + 28 * e
+        name, number, _, _, n, _, where = struct.unpack(">4siHHiii", data[entry:entry + 24])
+        tag = f"{name.decode('latin-1')}{number}"
+        if tag in wanted:
+            assert n == len(wanted[tag]), "trace length must not change"
+            data[where:where + 2 * n] = struct.pack(f">{n}h", *wanted[tag])
+    path.write_bytes(bytes(data))
+
+
+def write_read(chrom: Chromatogram, folder: Path, name: str) -> Path:
+    """Save a modified real read as ``folder/name`` + editing session.
+
+    The source ``.ab1`` (found by sample id) is copied; the called bases,
+    quality and peak positions go to the session sidecar, so ``load_read``
+    returns ``chrom``. A reverse-complemented display is detected from the
+    traces; traces changed by ``with_secondary_peak`` are written into the copy.
+    """
+    source = _source_by_sample_id()[chrom.sample_id]
+    path = Path(folder) / (name if name.lower().endswith(".ab1") else name + ".ab1")
+    shutil.copyfile(source, path)
+    original = read_ab1(source).traces
+    flipped = _mismatches(_flip(chrom.traces), original) < _mismatches(chrom.traces, original)
+    file_traces = _flip(chrom.traces) if flipped else dict(chrom.traces)
+    if file_traces != original:
+        _patch_traces(path, file_traces)
+    sessions.save_session(sessions.session_path(path), {
+        "source": path.name,
+        "seq": chrom.seq,
+        "quality": list(chrom.quality),
+        "peaks": list(chrom.peak_indices),
+        "edited": [],
+        "reversed_complement": flipped,
+    })
+    return path
