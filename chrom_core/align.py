@@ -31,6 +31,7 @@ GAP_EXTEND = -1.0
 MAX_REFERENCE_LENGTH = 100_000
 CIRCULAR_MARGIN = 50  # extra unrolled bases past len(read) for circular constructs
 MAX_COUNTED_ALTERNATIVES = 1000  # co-optimal paths examined to dedupe the circular copy
+MAX_PLACEMENT_PATHS = 100  # co-optimal paths examined to count distinct placements
 
 
 @dataclass(frozen=True)
@@ -58,6 +59,9 @@ class ReadAlignment:
     blocks: list                      # biopython aligned blocks, for gapped reconstruction
                                       # (unrolled coordinates for circular constructs)
     ref_length: int = 0               # construct length (0 = unknown, from align_read)
+    placements: int = 1               # distinct (non-overlapping) co-optimal placements;
+                                      # 0 = unknown. Unlike ``alternatives``, alternative
+                                      # gap positions inside one placement count once.
 
     @property
     def wraps(self) -> bool:
@@ -134,10 +138,11 @@ def align_read(read: str, reference: str) -> ReadAlignment:
     return _align(read, reference)[0]
 
 
-def _align(read: str, reference: str) -> tuple[ReadAlignment, object]:
+def _align(read: str, reference: str, L: int | None = None) -> tuple[ReadAlignment, object]:
     """align_read without the size limit (callers check it on the real length).
 
     Also returns biopython's co-optimal alignments for the winning strand.
+    ``L``: the circle length when ``reference`` is an unrolled circle.
     """
     aligner = _make_aligner()
     best: tuple[float, object, str, str] | None = None
@@ -175,7 +180,50 @@ def _align(read: str, reference: str) -> tuple[ReadAlignment, object]:
         alternatives=alternatives,
         oriented_read=oriented,
         blocks=blocks,
+        placements=_placements(alignments, L),
     ), alignments
+
+
+def _placements(alignments, L: int | None = None) -> int:
+    """Clusters of co-optimal paths whose reference spans overlap.
+
+    Up to ``MAX_PLACEMENT_PATHS`` paths are examined. With ``L`` (circular,
+    unrolled reference) spans are compared modulo L, so the unrolled copy of
+    the start is the same placement. 0 when iterating the paths fails.
+    """
+    spans: list[tuple[int, int]] = []
+    try:
+        for k, alignment in enumerate(alignments):
+            if k >= MAX_PLACEMENT_PATHS:
+                break
+            ts = alignment.aligned[0]
+            if len(ts):
+                spans.append((int(ts[0][0]), int(ts[-1][1])))
+    except Exception:
+        return 0
+    if not spans:
+        return 1
+
+    if L:  # start in the first copy; compare with the neighbouring copies too
+        spans = [(t0 % L, t0 % L + t1 - t0) for t0, t1 in spans]
+    shifts = (-L, 0, L) if L else (0,)
+
+    def overlap(a: tuple[int, int], b: tuple[int, int]) -> bool:
+        return any(a[0] < b[1] + s and b[0] + s < a[1] for s in shifts)
+
+    parent = list(range(len(spans)))
+
+    def root(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for i in range(len(spans)):
+        for j in range(i):
+            if overlap(spans[i], spans[j]):
+                parent[root(i)] = root(j)
+    return len({root(i) for i in range(len(spans))})
 
 
 def _circular_alternatives(raw: ReadAlignment, alignments, L: int) -> int:
@@ -263,7 +311,8 @@ def align_to_construct(read: str, construct: Construct) -> ReadAlignment:
     after the origin come last — not ascending by ``ref_pos``.
 
     ``alternatives`` counts co-optimal alignments distinct modulo L, so the
-    unrolled copy of the construct's start is not mistaken for a repeat.
+    unrolled copy of the construct's start is not mistaken for a repeat;
+    ``placements`` likewise compares reference spans modulo L.
 
     The size limit applies to ``L``, not to the unrolled sequence.
     """
@@ -274,7 +323,7 @@ def align_to_construct(read: str, construct: Construct) -> ReadAlignment:
         return replace(_align(read, seq)[0], ref_length=L)
 
     unrolled = seq + seq[: len(read) + CIRCULAR_MARGIN]
-    raw, alignments = _align(read, unrolled)
+    raw, alignments = _align(read, unrolled, L)
     alternatives = _circular_alternatives(raw, alignments, L)
     if not raw.blocks:
         return replace(raw, ref_length=L, alternatives=alternatives)

@@ -177,7 +177,9 @@ def test_read_in_unrolled_prefix_is_not_ambiguous() -> None:
     aln = align_to_construct(read, Construct("c", circle, True))
     assert (aln.ref_start, aln.ref_end) == (10, 210)
     assert aln.alternatives == 1
-    assert align_to_construct(read, Construct("c", circle, False)).alternatives == 1
+    assert aln.placements == 1
+    linear = align_to_construct(read, Construct("c", circle, False))
+    assert (linear.alternatives, linear.placements) == (1, 1)
 
 
 def test_genuine_repeat_in_circle_stays_ambiguous() -> None:
@@ -188,3 +190,14 @@ def test_genuine_repeat_in_circle_stays_ambiguous() -> None:
     circle = "".join(circle)
     aln = align_to_construct(repeat, Construct("c", circle, True))
     assert aln.alternatives == 2
+    assert aln.placements == 2
+
+
+def test_homopolymer_indel_across_origin_is_one_placement() -> None:
+    circle = _random_seq(1000, seed=31)
+    circle = circle[:995] + "GTTTC"           # a TTT run just before the origin
+    read = circle[900:996] + "TTTT" + circle[999:] + circle[:100]   # one extra T
+    aln = align_to_construct(read, Construct("c", circle, True))
+    assert aln.wraps
+    assert aln.alternatives > 1
+    assert aln.placements == 1

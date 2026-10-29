@@ -275,16 +275,27 @@ def test_ambiguous_read_excluded(coi, tmp_path):
         model.apply_trim(100, 500)
         paths.append(write_read(model.current(), tmp_path, name))
     r = verify_clone(_construct(coi + coi), None, _reads(*paths))
-    assert all(x.ambiguous for x in r.reads)
+    assert all(x.ambiguous and x.alignment.placements == 2 for x in r.reads)
+    assert r.verdict == "no_data"
+
+
+def test_genuine_repeat_single_read_is_no_data(coi, tmp_path):
+    model = EditableRead(real_read(F_NAME))
+    model.apply_trim(100, 500)
+    f = write_read(model.current(), tmp_path, F_NAME)
+    rng = random.Random(3)
+    spacer = "".join(rng.choice("ACGT") for _ in range(300))
+    r = verify_clone(_construct(coi + spacer + coi), None, _reads(f=f, r=None))
+    res, = r.reads
+    assert res.ambiguous and res.alignment.placements == 2
     assert r.verdict == "no_data"
     assert all(v == (0, 0) for v in r.coverage.values())
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "alternatives counts co-optimal gap placements, so an indel in a homopolymer "
-    "marks every read ambiguous and the clone becomes no_data (see task-7 report)"))
 def test_homopolymer_deletion_is_an_error_not_no_data(coi):
+    # co-optimal gap placements inside a run are one placement, not ambiguity (R15)
     r = verify_clone(_construct(mutate(coi, 200, "ins", "T")), REGION, _reads())  # TTTT -> TTTTT
+    assert all(x.alignment.alternatives > 1 and not x.ambiguous for x in r.reads)
     assert r.verdict == "errors"
     assert [(d.kind, d.status) for d in r.region_differences] == [("deletion", "confirmed")]
 
@@ -350,9 +361,10 @@ def test_load_read_applies_session(tmp_path):
     assert chrom.quality == tuple(model.quality)
 
 
-# Measured 2026-10-30 on the developer machine: 12.2-13.3 s (3 runs; the
-# exact DP alignment against 10 kb dominates). LIMIT = 2 x 13.3, rounded up.
-LIMIT = 27.0
+# Measured 2026-10-30 on the developer machine, after placements (R15) were
+# added: 15.1-15.5 s (3 runs; the exact DP alignment against 10 kb dominates).
+# LIMIT = 2 x 15.5, rounded up.
+LIMIT = 32.0
 
 
 def test_performance_12_clones_x_4_reads(coi):
@@ -370,4 +382,5 @@ def test_performance_12_clones_x_4_reads(coi):
     print(f"verify_all 12x4 on {len(construct.seq)} bp: {elapsed:.2f} s")
     assert len(reports) == 12
     assert all(r.verdict != "no_data" for r in reports)
+    assert not any(x.ambiguous or x.error for r in reports for x in r.reads)
     assert elapsed < LIMIT

@@ -178,7 +178,7 @@ class ReadResult:
     ref: ReadRef
     alignment: ReadAlignment | None   # None when ``error`` is set
     error: str = ""                   # "no_alignment" or why the file could not be used
-    ambiguous: bool = False           # alternatives > 1: excluded from the verdict
+    ambiguous: bool = False           # placements > 1: excluded from the verdict
 
 
 @dataclass(frozen=True)
@@ -400,7 +400,7 @@ def verify_clone(
         if al.covered < MIN_ALIGNED_BP or al.identity < MIN_IDENTITY:
             results.append(ReadResult(read_ref, None, error="no_alignment"))
             continue
-        ambiguous = al.alternatives > 1
+        ambiguous = al.placements > 1   # distinct placements, not co-optimal paths
         results.append(ReadResult(read_ref, al, ambiguous=ambiguous))
         if not ambiguous:
             strand = al.strand if not flipped else {"+": "-", "-": "+"}[al.strand]
