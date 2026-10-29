@@ -108,11 +108,15 @@ def batch_export(
     return results
 
 
-def _csv_field(value) -> str:
+def csv_field(value, sep: str = ";") -> str:
+    """One CSV field, quoted when it contains ``sep``, a quote or a line break."""
     text = str(value)
-    if any(ch in text for ch in ';"\n'):
+    if any(ch in text for ch in f'{sep}"\n\r'):
         text = '"' + text.replace('"', '""') + '"'
     return text
+
+
+_csv_field = csv_field
 
 
 def summary_csv(reports: list[FileReport]) -> str:
