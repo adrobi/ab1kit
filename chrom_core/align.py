@@ -30,6 +30,7 @@ GAP_OPEN = -10.0
 GAP_EXTEND = -1.0
 MAX_REFERENCE_LENGTH = 100_000
 CIRCULAR_MARGIN = 50  # extra unrolled bases past len(read) for circular constructs
+MAX_COUNTED_ALTERNATIVES = 1000  # co-optimal paths examined to dedupe the circular copy
 
 
 @dataclass(frozen=True)
@@ -130,11 +131,14 @@ def align_read(read: str, reference: str) -> ReadAlignment:
     """Align a (possibly reverse-strand) read into the reference."""
     read, reference = _clean(read, reference)
     _check_length(len(reference))
-    return _align(read, reference)
+    return _align(read, reference)[0]
 
 
-def _align(read: str, reference: str) -> ReadAlignment:
-    """align_read without the size limit (callers check it on the real length)."""
+def _align(read: str, reference: str) -> tuple[ReadAlignment, object]:
+    """align_read without the size limit (callers check it on the real length).
+
+    Also returns biopython's co-optimal alignments for the winning strand.
+    """
     aligner = _make_aligner()
     best: tuple[float, object, str, str] | None = None
     for strand, oriented in (("+", read), ("-", reverse_complement(read))):
@@ -171,7 +175,32 @@ def _align(read: str, reference: str) -> ReadAlignment:
         alternatives=alternatives,
         oriented_read=oriented,
         blocks=blocks,
-    )
+    ), alignments
+
+
+def _circular_alternatives(raw: ReadAlignment, alignments, L: int) -> int:
+    """Co-optimal alignments distinct modulo L.
+
+    A read in the first ``len(read) + CIRCULAR_MARGIN`` bases also matches the
+    unrolled copy, shifted by exactly L; such pairs count once. 0 stays
+    "unknown". Beyond ``MAX_COUNTED_ALTERNATIVES`` paths the raw count is
+    returned: an upper bound, and at least half of it is distinct (at most two
+    copies of any path fit in the unrolled sequence), so it stays > 1.
+    """
+    if raw.alternatives <= 1 or raw.alternatives > MAX_COUNTED_ALTERNATIVES:
+        return raw.alternatives
+    distinct = set()
+    try:
+        for alignment in alignments:
+            ts, qs = alignment.aligned
+            shift = (int(ts[0][0]) // L) * L if len(ts) else 0
+            distinct.add(tuple(
+                (int(t0) - shift, int(t1) - shift, int(q0), int(q1))
+                for (t0, t1), (q0, q1) in zip(ts, qs)
+            ))
+    except Exception:  # same "unknown" convention as align_read
+        return 0
+    return len(distinct)
 
 
 def _walk_blocks(
@@ -227,20 +256,28 @@ def align_to_construct(read: str, construct: Construct) -> ReadAlignment:
     first pass (in alignment order, from the alignment start) is kept: blocks
     are clipped at ``start + L``, so at most L positions are reported, each
     once, and identity/differences are computed over the clipped alignment.
-    Full coverage is normalised to ``(0, L)``. Differences are listed in
-    alignment order (the part after the origin last). The size limit applies
-    to ``L``, not to the unrolled sequence.
+    ``score`` however stays that of the unclipped raw alignment. Full coverage
+    is normalised to ``(0, L)``.
+
+    For a wrapped alignment ``differences`` is in alignment order — positions
+    after the origin come last — not ascending by ``ref_pos``.
+
+    ``alternatives`` counts co-optimal alignments distinct modulo L, so the
+    unrolled copy of the construct's start is not mistaken for a repeat.
+
+    The size limit applies to ``L``, not to the unrolled sequence.
     """
     read, seq = _clean(read, construct.seq)
     L = len(seq)
     _check_length(L)
     if not construct.circular:
-        return replace(_align(read, seq), ref_length=L)
+        return replace(_align(read, seq)[0], ref_length=L)
 
     unrolled = seq + seq[: len(read) + CIRCULAR_MARGIN]
-    raw = _align(read, unrolled)
+    raw, alignments = _align(read, unrolled)
+    alternatives = _circular_alternatives(raw, alignments, L)
     if not raw.blocks:
-        return replace(raw, ref_length=L)
+        return replace(raw, ref_length=L, alternatives=alternatives)
 
     shift = (raw.blocks[0][0][0] // L) * L  # make the alignment start in the first copy
     limit = raw.blocks[0][0][0] - shift + L
@@ -270,6 +307,7 @@ def align_to_construct(read: str, construct: Construct) -> ReadAlignment:
         ref_to_read={p % L: q for p, q in ref_to_read.items()},
         differences=[replace(d, ref_pos=d.ref_pos % L) for d in differences],
         identity=identity,
+        alternatives=alternatives,
         blocks=clipped,
         ref_length=L,
     )

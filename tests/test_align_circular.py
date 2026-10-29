@@ -169,3 +169,22 @@ def test_limit_applies_to_original_length() -> None:
         align_to_construct(read, Construct("big", big + "A", True))
     with pytest.raises(ValueError):
         align_to_construct(read, Construct("big", big + "A", False))
+
+
+def test_read_in_unrolled_prefix_is_not_ambiguous() -> None:
+    circle = _random_seq(1000, seed=21)
+    read = circle[10:210]  # also present in the unrolled copy of the start
+    aln = align_to_construct(read, Construct("c", circle, True))
+    assert (aln.ref_start, aln.ref_end) == (10, 210)
+    assert aln.alternatives == 1
+    assert align_to_construct(read, Construct("c", circle, False)).alternatives == 1
+
+
+def test_genuine_repeat_in_circle_stays_ambiguous() -> None:
+    circle = list(_random_seq(1000, seed=23))
+    repeat = _random_seq(100, seed=24)
+    circle[20:120] = repeat   # inside the unrolled prefix as well
+    circle[600:700] = repeat
+    circle = "".join(circle)
+    aln = align_to_construct(repeat, Construct("c", circle, True))
+    assert aln.alternatives == 2
