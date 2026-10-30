@@ -6,17 +6,41 @@ on:
   workflow_dispatch:
 
 jobs:
-  windows-exe:
-    runs-on: windows-latest
+  build:
+    name: build (${{ matrix.artifact }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: ab1kit-windows
+            file: dist/ab1kit.exe
+          - os: ubuntu-22.04
+            artifact: ab1kit-linux-x86_64
+            file: ab1kit-linux-x86_64.tar.gz
     permissions:
-      contents: write
+      contents: read
+    env:
+      QT_QPA_PLATFORM: offscreen
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+      - name: Install Qt runtime libraries (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libxkbcommon-x11-0 libxcb-cursor0 \
+            libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 \
+            libxcb-render-util0 libxcb-shape0 libxcb-xinerama0 libxcb-xfixes0 libgl1
       - run: python -m pip install -e ".[dev]" "pyinstaller==6.22.3"
+      - name: Run tests
+        run: python -m pytest -q
+
       - name: Build exe (errors surfaced as annotations)
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           python -m PyInstaller ab1kit.spec --noconfirm --workpath build-pyinstaller 2>&1 |
@@ -26,13 +50,80 @@ jobs:
             Write-Host "::error::PyInstaller failed, log tail: $tail"
             exit 1
           }
+      - name: Build binary (errors surfaced as annotations)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -o pipefail
+          if ! python -m PyInstaller ab1kit.spec --noconfirm --workpath build-pyinstaller 2>&1 | tee build_log.txt; then
+            tail_log=$(tail -n 30 build_log.txt | tr '\n' '|')
+            echo "::error::PyInstaller failed, log tail: ${tail_log}"
+            exit 1
+          fi
+
+      - name: Smoke-test frozen exe (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force smoke/reads | Out-Null
+          Copy-Item tests/data/real/Achl_ACHLO006-09_*.ab1 smoke/reads/
+          # The exe is windowed: Start-Process -Wait -PassThru is needed to get the exit code.
+          $p = Start-Process -FilePath dist/ab1kit.exe -Wait -PassThru -ArgumentList @(
+            "verify-clones", "--construct", "tests/data/refs/coi_HM417896.gb",
+            "smoke/reads", "-o", "smoke/report.xlsx")
+          if ($p.ExitCode -ne 0) {
+            Write-Host "::error::smoke test: ab1kit.exe verify-clones exited with $($p.ExitCode)"
+            exit 1
+          }
+          if (-not (Test-Path smoke/report.xlsx)) {
+            Write-Host "::error::smoke test: smoke/report.xlsx was not created"
+            exit 1
+          }
+      - name: Smoke-test frozen binary (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          mkdir -p smoke/reads
+          cp tests/data/real/Achl_ACHLO006-09_*.ab1 smoke/reads/
+          rc=0
+          dist/ab1kit verify-clones --construct tests/data/refs/coi_HM417896.gb \
+            smoke/reads -o smoke/report.xlsx || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::smoke test: dist/ab1kit verify-clones exited with $rc"
+            exit 1
+          fi
+          if [ ! -f smoke/report.xlsx ]; then
+            echo "::error::smoke test: smoke/report.xlsx was not created"
+            exit 1
+          fi
+
+      - name: Package tarball (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          cp README.md LICENSE dist/
+          tar -czf ab1kit-linux-x86_64.tar.gz -C dist ab1kit README.md LICENSE
+
       - uses: actions/upload-artifact@v4
         with:
-          name: ab1kit-windows
-          path: dist/ab1kit.exe
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.file }}
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
       - name: Create GitHub release
-        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/ab1kit.exe
+          files: |
+            artifacts/ab1kit-windows/ab1kit.exe
+            artifacts/ab1kit-linux-x86_64/ab1kit-linux-x86_64.tar.gz
           generate_release_notes: true

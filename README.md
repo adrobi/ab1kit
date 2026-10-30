@@ -124,9 +124,16 @@ python -m venv .venv
 .venv/Scripts/ab1kit                     # launch the GUI
 ```
 
-`ab1kit` also accepts a file or folder argument. On Windows, a prebuilt
-executable is available on the [Releases](https://github.com/adrobi/ab1kit/releases)
-page.
+`ab1kit` also accepts a file or folder argument. Prebuilt binaries are on the
+[Releases](https://github.com/adrobi/ab1kit/releases) page:
+
+- **Windows:** `ab1kit.exe` (single file, no installation).
+- **Linux (x86_64):** `ab1kit-linux-x86_64.tar.gz`. Unpack with
+  `tar -xzf ab1kit-linux-x86_64.tar.gz` and run `./ab1kit`. Built on Ubuntu
+  22.04, so it needs glibc 2.35 or newer. The GUI needs the usual Qt runtime
+  libraries; on Debian/Ubuntu:
+  `sudo apt install libegl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xinerama0 libxcb-xfixes0 libgl1`.
+  The Linux binary prints CLI output to the terminal normally.
 
 ## Keyboard shortcuts
 

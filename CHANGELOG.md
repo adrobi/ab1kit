@@ -24,6 +24,8 @@ from the command line.
 - Background tasks with progress and cancel
 - Command-line subcommands `verify-clones`, `qc` and `export` (no Qt import)
 - Real-data test corpus (sangeranalyseR reads, COI and pUC19 references)
+- Linux release build (`ab1kit-linux-x86_64.tar.gz`) alongside the Windows exe, built and smoke-tested by GitHub Actions
+- Application icon (window and Windows exe)
 
 ### Changed
 - Refreshed UI: QSS theme, icons, one status palette everywhere
