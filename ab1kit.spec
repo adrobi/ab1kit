@@ -13,7 +13,7 @@ a = Analysis(
         ("ui/style_dark.qss", "ui"),
         ("ui/icons", "ui/icons"),
     ],
-    hiddenimports=["chrom_core", "ui", "ui.read_view", "ui.status", "ui.tables", "i18n", "translations_en"],
+    hiddenimports=["chrom_core", "ui", "ui.read_view", "ui.construct", "ui.status", "ui.tables", "i18n", "translations_en"],
     hookspath=[],
     excludes=["tkinter", "matplotlib", "numpy.tests"],
     noarchive=False,

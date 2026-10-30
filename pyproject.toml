@@ -22,7 +22,7 @@ dev = ["pytest>=8"]
 ab1kit = "chrom_cli:main"
 
 [tool.setuptools]
-packages = ["chrom_core", "ui", "ui.read_view"]
+packages = ["chrom_core", "ui", "ui.read_view", "ui.construct"]
 py-modules = ["chrom_cli", "i18n", "translations_en"]
 
 [tool.setuptools.package-data]

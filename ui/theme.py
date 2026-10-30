@@ -20,6 +20,14 @@ LIGHT = {
     "low_q": "#e02020",
     "mid_q": "#e0a000",
     "high_q": "#1e9e1e",
+    # construct matrix: coverage on both strands / one strand, empty track,
+    # region frame, features (CDS/gene and others)
+    "cov_both": "#4caf50",
+    "cov_one": "#b5e0b7",
+    "track": "#e8e8e8",
+    "region": "#2563eb",
+    "feature_cds": "#2e8b57",
+    "feature": "#7a8290",
 }
 
 DARK = {
@@ -35,6 +43,12 @@ DARK = {
     "low_q": "#ff5252",
     "mid_q": "#e0a000",
     "high_q": "#37d437",
+    "cov_both": "#43a047",
+    "cov_one": "#3d6e41",
+    "track": "#333333",
+    "region": "#5b8def",
+    "feature_cds": "#2e7d4f",
+    "feature": "#5c6370",
 }
 
 
