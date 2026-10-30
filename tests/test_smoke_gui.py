@@ -25,9 +25,28 @@ def no_config_writes(monkeypatch, tmp_path):
     the example files (closing a modified window autosaves one)."""
     monkeypatch.setattr("ui.main_window.save_config", lambda *a, **k: None)
     monkeypatch.setattr("ui.read_view.read_view.save_config", lambda *a, **k: None)
+    monkeypatch.setattr("ui.construct.workspace.save_config", lambda *a, **k: None)
     from chrom_core import sessions
 
     monkeypatch.setattr(sessions, "session_path", lambda _p: tmp_path / "session.json")
+
+
+@pytest.fixture(autouse=True)
+def delete_windows():
+    """Destroy the windows a test created: closed windows otherwise stay alive
+    and every later theme switch restyles all of them."""
+    yield
+    from PySide6.QtCore import QCoreApplication, QEvent
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance()
+    if app is None:
+        return
+    for widget in app.topLevelWidgets():
+        widget.close()
+        widget.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete.value)
+    app.processEvents()
 
 
 def _wait_for(app, predicate, timeout=5.0):

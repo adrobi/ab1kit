@@ -79,6 +79,10 @@ class GroupingDialog(QDialog):
 
         self._fill(grouping)
         self._error.hide()
+        try:   # a stale pattern from the config: flag it, keep the given grouping
+            group_reads([], pattern or None, self._tokens)
+        except ValueError as exc:
+            self._set_invalid(str(exc))
         self.pattern_edit.textChanged.connect(self._pattern_changed)
 
     # ------------------------------------------------------------- public API

@@ -14,11 +14,13 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
-from PySide6.QtGui import QColor, QImage, QMouseEvent, QWheelEvent
+from PySide6.QtGui import QAction, QColor, QImage, QMouseEvent, QWheelEvent
 from PySide6.QtWidgets import QApplication
 
 from chrom_core.align import align_to_construct
-from chrom_core.clones import CloneDifference, CloneReport, Grouping, ReadRef, verify_all
+from chrom_core.clones import (
+    CloneDifference, CloneReport, Grouping, ReadRef, VerifyParams, verify_all,
+)
 from chrom_core.editing import EditableRead
 from chrom_core.reference import load_construct
 from clone_fixtures import COI_GB, DATA, real_read, with_secondary_peak, write_read
@@ -662,6 +664,17 @@ def window(qapp, monkeypatch):
     yield w
     w._cancel_tasks()
     w.close()
+    _delete(qapp, w)
+
+
+def _delete(qapp, widget):
+    """Really destroy a test window (closed windows otherwise live on and make
+    every later theme switch restyle them)."""
+    from PySide6.QtCore import QCoreApplication, QEvent
+
+    widget.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete.value)
+    qapp.processEvents()
 
 
 def _wait_idle(qapp, ws, timeout=30.0):
@@ -929,3 +942,114 @@ def test_new_ui_keys_exist_in_both_languages():
     assert {"tab.construct", "menu.project.open", "workspace.drop_construct"} <= keys
     assert not (keys - set(i18n.RU)), keys - set(i18n.RU)
     assert not (keys - set(i18n.EN)), keys - set(i18n.EN)
+
+
+# ------------------------------------------------------------------ Task 16 review fixes
+
+
+def test_hidden_viewer_actions_do_nothing_on_construct_tab(qapp, window, tmp_path, construct):
+    f_copy = tmp_path / F_NAME
+    f_copy.write_bytes(F.read_bytes())
+    ws = _loaded(qapp, window, COI_GB, [f_copy])
+    ws.detail.open_read.emit(f_copy)
+    assert window.tabs.currentWidget() is window.read_view
+    window.apply_base_change(_f_index(construct, P), "N")
+    _wait_idle(qapp, ws)
+    edited = "".join(window.read_model.seq)
+    assert window.undo_action.isEnabled()
+
+    window.tabs.setCurrentWidget(ws)
+    starts = _count_starts(ws)
+    assert not window.undo_action.isEnabled()
+    window.undo_action.trigger()
+    for action in window.read_view.findChildren(QAction):
+        if action.parent() is window.read_view:
+            assert not action.isEnabled(), action.text()
+    assert "".join(window.read_model.seq) == edited and starts == []
+
+    window.tabs.setCurrentWidget(window.read_view)
+    assert window.undo_action.isEnabled() and not window.redo_action.isEnabled()
+
+
+def test_clear_resets_matrix_and_summary(qapp, window, tmp_path):
+    ws = _loaded(qapp, window)
+    assert ws.matrix.visible_clones()
+    ws.clear()
+    assert ws.matrix.visible_clones() == [] and ws.summary.title_text() == ""
+    assert not ws.detail.isVisible()
+    _drop(ws, [COI_GB, REAL_DIR])
+    assert ws.is_verifying()
+    window._cancel_tasks()
+    _wait_idle(qapp, ws)
+    assert ws.matrix.visible_clones() == [] and ws.reports() == []
+    assert ws.summary.title_text() == ""
+
+
+def test_project_with_missing_construct_is_not_reported_open(qapp, window, tmp_path):
+    from chrom_core.project import Project, save_project
+
+    project = tmp_path / "lost.ab1proj"
+    save_project(project, Project(tmp_path / "gone.gb", False, None,
+                                  Grouping([ReadRef(F, "c1", "F")]), VerifyParams()))
+    said = []
+    window.workspace.status_message.connect(lambda text, _ms: said.append(text))
+    assert window.workspace.load_project(project) is False
+    assert window.workspace.project_path() is None
+    assert len(window.messages) == 1 and "gone.gb" in window.messages[0]
+    assert not any("lost.ab1proj" in s for s in said)
+
+
+def test_drop_without_changes_does_not_reverify(qapp, window, tmp_path):
+    ws = _loaded(qapp, window)
+    starts = _count_starts(ws)
+    _drop(ws, [REAL_DIR])                      # nothing new
+    bad = tmp_path / "broken.gb"
+    bad.write_text("LOCUS nonsense\n", encoding="utf-8")
+    _drop(ws, [bad])                           # construct fails to load
+    assert starts == []
+    assert len(window.messages) == 1
+
+
+def test_wrapping_region_on_circular_construct_survives_project(qapp, window, tmp_path, construct):
+    fasta = tmp_path / "coi.fa"                # FASTA constructs are circular
+    fasta.write_text(f">coi\n{construct.seq}\n")
+    ws = _loaded(qapp, window, fasta, [REAL_DIR])
+    assert ws.construct().circular
+    ws.controls.start_spin.setValue(600)
+    ws.controls.end_spin.setValue(50)
+    assert ws.region() == (599, 50)
+    _wait_idle(qapp, ws)
+    project = tmp_path / "wrap.ab1proj"
+    assert ws.save_project(project)
+    ws.clear()
+    assert ws.load_project(project)
+    _wait_idle(qapp, ws)
+    assert ws.region() == (599, 50) and ws.construct().circular
+    assert (ws.controls.start_spin.value(), ws.controls.end_spin.value()) == (600, 50)
+    assert window.messages == []
+
+
+def test_grouping_dialog_flags_invalid_initial_pattern(qapp):
+    from PySide6.QtWidgets import QDialogButtonBox
+
+    from chrom_core.clones import group_reads
+    from ui.construct.grouping_dialog import GroupingDialog
+
+    grouping = group_reads(sorted(REAL_DIR.glob("*.ab1")))
+    dialog = GroupingDialog(grouping, "(?P<clone>[", None)
+    assert dialog.pattern_invalid()
+    assert not dialog.buttons.button(QDialogButtonBox.StandardButton.Ok).isEnabled()
+    assert dialog.table.rowCount() == 8 and dialog.result_grouping().to_dict() == grouping.to_dict()
+
+
+def test_double_spin_follows_ui_language(qapp):
+    from i18n import set_language
+    from ui.construct.controls import ControlsBar
+
+    try:
+        set_language("en")
+        assert ControlsBar().het_ratio.text() == "0.40"
+        set_language("ru")
+        assert ControlsBar().het_ratio.text() == "0,40"
+    finally:
+        set_language("ru")

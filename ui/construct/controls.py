@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QLocale, Qt, Signal
 from PySide6.QtGui import QDragEnterEvent, QDropEvent, QMouseEvent
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from chrom_core.clones import Region, VerifyParams
-from i18n import tr
+from i18n import language, tr
 from ui.theme import theme as palette
 
 
@@ -186,6 +186,8 @@ class ControlsBar(QWidget):
         self.het_ratio.setRange(0.05, 0.95)
         self.het_ratio.setSingleStep(0.05)
         self.het_ratio.setDecimals(2)
+        self.het_ratio.setLocale(QLocale(
+            QLocale.Language.English if language() == "en" else QLocale.Language.Russian))
         self.het_ratio.setValue(defaults.het_ratio)
         self.het_ratio.setKeyboardTracking(False)
         self.het_ratio.setToolTip(tr("workspace.het_ratio_tip"))

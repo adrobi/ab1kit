@@ -78,6 +78,12 @@ class SummaryBar(QWidget):
             button.setText(tr(f"construct.count.{verdict}", n=n))
             button.setVisible(n > 0)
 
+    def clear(self) -> None:
+        self._title.clear()
+        self._info.clear()
+        for button in self._counters.values():
+            button.hide()
+
     def counter(self, verdict: str) -> QPushButton:
         return self._counters[verdict]
 

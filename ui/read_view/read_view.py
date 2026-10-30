@@ -67,6 +67,7 @@ class ReadView(QMainWindow):
         self.config = config
         self._start_task = start_task
         self._path: Path | None = None
+        self._active = True    # False while the shell shows another tab
         self.read_model: EditableRead | None = None
         self.trim_dialog: TrimDialog | None = None
         self.reference_seq: str = ""
@@ -503,10 +504,18 @@ class ReadView(QMainWindow):
             repaint_statuses(table)
 
     # --------------------------------------------------------------- editing
+    def set_active(self, active: bool) -> None:
+        """Enable or disable all of the view's own actions (menus, toolbar,
+        shortcuts), so a hidden view cannot be edited by a stray shortcut."""
+        self._active = bool(active)
+        for action in self.findChildren(QAction, options=Qt.FindChildOption.FindDirectChildrenOnly):
+            action.setEnabled(self._active)
+        self._sync_actions()
+
     def _sync_actions(self) -> None:
         model = self.read_model
-        self.undo_action.setEnabled(bool(model and model.can_undo))
-        self.redo_action.setEnabled(bool(model and model.can_redo))
+        self.undo_action.setEnabled(self._active and bool(model and model.can_undo))
+        self.redo_action.setEnabled(self._active and bool(model and model.can_redo))
 
     def refresh_read(self) -> None:
         if self.read_model is None:

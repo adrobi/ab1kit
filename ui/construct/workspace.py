@@ -158,9 +158,6 @@ class ConstructWorkspace(QWidget):
     def project_path(self) -> Path | None:
         return self._project_path
 
-    def has_data(self) -> bool:
-        return self._base is not None or bool(self._grouping.reads or self._grouping.unassigned)
-
     def contains_read(self, path: Path | str) -> bool:
         key = path_key(path)
         return any(path_key(p) == key for p in self._all_paths())
@@ -246,6 +243,9 @@ class ConstructWorkspace(QWidget):
         self._grouping, self._reports = Grouping(), []
         self._project_path = None
         self._selected = None
+        self._shown_construct = None
+        self.matrix.clear()
+        self.summary.clear()
         self.detail.hide()
         self.controls.set_params(VerifyParams())
         self._sync_controls()
@@ -270,12 +270,13 @@ class ConstructWorkspace(QWidget):
                 self._circular = project.circular
                 if self._region_ok(project.region, project.circular, warn=True):
                     self._region = project.region
-            self._project_path = path
+                self._project_path = path
         finally:
             self._loading = False
         self._sync_controls()
         self._reverify()
-        self.status_message.emit(tr("workspace.project_loaded", name=path.name), 5000)
+        if ok:   # without its construct the project is not open: Save asks for a file
+            self.status_message.emit(tr("workspace.project_loaded", name=path.name), 5000)
         return ok
 
     def save_project(self, path: Path | str) -> bool:
@@ -346,15 +347,17 @@ class ConstructWorkspace(QWidget):
             return
         constructs = [p for p in paths if p.is_file() and p.suffix.lower() != ".ab1"]
         reads = [p for p in paths if p.is_dir() or p.suffix.lower() == ".ab1"]
+        changed = False
         self._loading = True
         try:
             if constructs:
-                self.set_construct(constructs[0])
+                changed = self.set_construct(constructs[0])
             if reads:
-                self.add_reads(reads)
+                changed = self.add_reads(reads) > 0 or changed
         finally:
             self._loading = False
-        self._reverify()
+        if changed:
+            self._reverify()
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # noqa: N802
         if dropped_paths(event):

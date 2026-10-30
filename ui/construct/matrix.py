@@ -152,6 +152,13 @@ class CloneMatrix(QWidget):
         self.updateGeometry()
         self.update()
 
+    def clear(self) -> None:
+        """No construct, no rows (the empty placeholder is painted)."""
+        self._construct, self._region, self._rows = None, None, []
+        self._band, self._press, self._mode = None, None, ""
+        self.updateGeometry()
+        self.update()
+
     def set_filter(self, verdicts: set[str]) -> None:
         self._filter = set(verdicts)
         self.updateGeometry()

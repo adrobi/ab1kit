@@ -74,6 +74,8 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.workspace, tr("tab.construct"))
         self.tabs.addTab(self.read_view, tr("tab.read"))
         self.setCentralWidget(self.tabs)
+        self.tabs.currentChanged.connect(
+            lambda _i: self.read_view.set_active(self.tabs.currentWidget() is self.read_view))
         self.read_view.file_opened.connect(self._push_recent)
         self.read_view.file_opened.connect(lambda _p: self.tabs.setCurrentWidget(self.read_view))
         self.read_view.status_message.connect(self.statusBar().showMessage)
@@ -88,6 +90,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(tr("status.ready"))
         self._build_task_status()
         self._fill_recent_menu()
+        self.read_view.set_active(self.tabs.currentWidget() is self.read_view)
 
     # ------------------------------------------------------------------ tasks
     def _build_task_status(self) -> None:
