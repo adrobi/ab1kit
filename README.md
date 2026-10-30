@@ -102,7 +102,10 @@ ab1kit export reads/ --trim --fasta -o trimmed/
 
 `verify-clones` prints a table of clones and exits with 0 if at least one clone
 is `ok`, 1 if none is, 2 on invalid input; `-o report.csv` writes `report.csv`
-and `report_differences.csv`. Options: `--region A-B` (1-based, inclusive),
+and `report_differences.csv`. The `differences` count (table and report) is the
+in-region differences that are not low quality, i.e. those behind `errors`.
+Reads that could not be used (unreadable, not aligned, ambiguous placement) are
+listed on stderr as `ab1kit: <file>: <reason>` and in the `read_issues` column. Options: `--region A-B` (1-based, inclusive),
 `--linear`, `--pattern REGEX`, `--min-q N`, `--het-ratio X`.
 
 The exit-code contract applies to the `ab1kit` command installed with pip. The
@@ -121,6 +124,7 @@ Requires Python 3.11+:
 python -m venv .venv
 .venv/Scripts/pip install -e ".[dev]"    # Windows; on POSIX: .venv/bin/pip
 .venv/Scripts/python -m pytest           # run the test suite
+.venv/Scripts/python -m pytest -m perf   # timing tests (skipped by default)
 .venv/Scripts/ab1kit                     # launch the GUI
 ```
 
@@ -132,7 +136,7 @@ python -m venv .venv
   `tar -xzf ab1kit-linux-x86_64.tar.gz` and run `./ab1kit`. Built on Ubuntu
   22.04, so it needs glibc 2.35 or newer. The GUI needs the usual Qt runtime
   libraries; on Debian/Ubuntu:
-  `sudo apt install libegl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xinerama0 libxcb-xfixes0 libgl1`.
+  `sudo apt install libegl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xinerama0 libxcb-xfixes0 libgl1 libfontconfig1 libdbus-1-3 libglib2.0-0 libxcb-xkb1 libxcb-xinput0 libxcb-shm0`.
   The Linux binary prints CLI output to the terminal normally.
 
 ## Keyboard shortcuts

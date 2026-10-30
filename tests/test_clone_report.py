@@ -6,6 +6,8 @@ import csv
 import io
 from dataclasses import replace
 
+from pathlib import Path
+
 import pytest
 from openpyxl import load_workbook
 
@@ -55,20 +57,56 @@ def _rows(text: str) -> list[list[str]]:
 def test_clones_csv_header_and_rows(reports):
     rows = _rows(clones_csv(reports))
     assert rows[0] == ["clone", "verdict", "region_coverage_pct", "both_strands_pct",
-                       "differences", "reads"]
+                       "differences", "reads", "read_issues"]
     assert len(rows) == 3
     c1, c2 = rows[1], rows[2]
     assert c1[:2] == ["c1", "ok"]
     assert c1[2] == "100.0" and c1[3] == "97.0"   # F and R overlap on most of the region
     assert c1[4] == "0"
-    assert c1[5] == f"{F.name}|{R.name}"
+    assert c1[5] == f"{F.name}|{R.name}" and c1[6] == ""
     assert c2[:2] == ["c2", "errors"]
-    assert c2[4] == str(len(reports[1].differences))
+    assert c2[4] == "1"   # in-region, not low quality: the outside one is not counted
 
 
 def test_clones_csv_empty():
     assert clones_csv([]).splitlines() == [
-        "clone,verdict,region_coverage_pct,both_strands_pct,differences,reads"]
+        "clone,verdict,region_coverage_pct,both_strands_pct,differences,reads,read_issues"]
+
+
+def _diff(**kw):
+    from chrom_core.clones import CloneDifference
+
+    base = dict(ref_pos=1, kind="substitution", ref_base="A", read_base="G", support=1,
+                against=0, low_quality=0, status="confirmed", in_region=True)
+    return CloneDifference(**{**base, **kw})
+
+
+def test_differences_column_counts_what_the_verdict_uses():
+    from chrom_core.clones import CloneReport
+
+    diffs = (_diff(), _diff(ref_pos=2, status="disputed", against=1),
+             _diff(ref_pos=3, status="low_quality", support=0, low_quality=2),
+             _diff(ref_pos=4, in_region=False))
+    report = CloneReport("c", (), {}, diffs, (), "errors")
+    assert report.error_differences == diffs[:2]
+    assert _rows(clones_csv([report]))[1][4] == "2"
+
+
+def test_read_issues_column():
+    from chrom_core.clones import CloneReport, ReadResult
+
+    ok = verify_clone(Construct("c", coi_reference(), False), REGION,
+                      _reads("c", (F, "F"))).reads[0]
+    results = (
+        ok,
+        ReadResult(ReadRef(Path("x.ab1"), "c", "F"), None, error="not an ABIF file"),
+        ReadResult(ReadRef(Path("n.ab1"), "c", "F"), None, error="no_alignment"),
+        replace(ok, ref=ReadRef(Path("y.ab1"), "c", "R"), ambiguous=True),
+    )
+    report = CloneReport("c", results, {}, (), (), "no_data")
+    assert _rows(clones_csv([report]))[1][6] == (
+        "x.ab1: unreadable (not an ABIF file); n.ab1: did not align to the construct; "
+        "y.ab1: ambiguous placement")
 
 
 def test_differences_csv_header_position_and_notes(reports):
@@ -108,7 +146,7 @@ def test_csv_quotes_commas_and_quotes():
     weird = CloneReport('a,"b"', (), {}, (), (), "no_data")
     rows = _rows(clones_csv([weird]))
     assert rows[1][0] == 'a,"b"'
-    assert len(rows[1]) == 6
+    assert len(rows[1]) == 7
     assert batch.csv_field("x,y", sep=",") == '"x,y"'
     assert batch.csv_field("x,y") == "x,y"
 
@@ -120,7 +158,8 @@ def test_xlsx_sheets_and_fill(reports, tmp_path):
     assert book.sheetnames == ["Clones", "Differences"]
     clones, diffs = book["Clones"], book["Differences"]
     assert [c.value for c in clones[1]] == ["clone", "verdict", "region_coverage_pct",
-                                            "both_strands_pct", "differences", "reads"]
+                                            "both_strands_pct", "differences", "reads",
+                                            "read_issues"]
     assert clones.max_row == 3
     assert clones["B2"].value == "ok" and clones["B3"].value == "errors"
     assert clones["B3"].fill.fgColor.rgb[-6:] == STATUS_HEX["errors"][0].lstrip("#").upper()

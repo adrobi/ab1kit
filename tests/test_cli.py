@@ -233,3 +233,47 @@ def test_attached_console_is_all_or_nothing(monkeypatch) -> None:
     monkeypatch.setattr(sys, "stderr", None)
     chrom_cli._attach_console()
     assert sys.stdout is None and sys.stderr is None
+
+
+def test_unusable_reads_reported_on_stderr(reads_dir: Path, tmp_path: Path, capsys) -> None:
+    good = chrom_cli.main(["verify-clones", "--construct", str(COI_GB), str(reads_dir),
+                           "-o", str(tmp_path / "a.csv")])
+    capsys.readouterr()
+    (reads_dir / "Achl_ACHLO006-09_3_F.ab1").write_bytes(b"not an ab1 file at all")
+    source = (DATA / "real" / READS[0]).read_bytes()
+    (reads_dir / "Achl_ACHLO006-09_4_F.ab1").write_bytes(source[:len(source) // 3])
+    out = tmp_path / "b.csv"
+    code = chrom_cli.main(["verify-clones", "--construct", str(COI_GB), str(reads_dir),
+                           "-o", str(out)])
+    assert code == good
+    err = capsys.readouterr().err.splitlines()
+    for name in ("Achl_ACHLO006-09_3_F.ab1", "Achl_ACHLO006-09_4_F.ab1"):
+        assert any(line.startswith(f"ab1kit: {name}: unreadable") for line in err), err
+    assert "Achl_ACHLO006-09_3_F.ab1: unreadable" in out.read_text(encoding="utf-8")
+
+
+def test_read_issue_wording() -> None:
+    from chrom_core.clone_report import read_issue
+    from chrom_core.clones import ReadRef, ReadResult
+
+    ref = ReadRef(Path("a.ab1"), "c", "F")
+    assert read_issue(ReadResult(ref, None, error="no_alignment")) == \
+        "did not align to the construct"
+    assert read_issue(ReadResult(ref, None, error="bad header")) == "unreadable (bad header)"
+
+
+def test_cli_difference_count_matches_report(reads_dir: Path, tmp_path: Path, capsys) -> None:
+    ref = tmp_path / "mutated.fasta"
+    seq = coi_reference()
+    alt = lambda b: "A" if b != "A" else "C"
+    seq = mutate(mutate(seq, 250, "sub", alt(seq[250])), 300, "sub", alt(seq[300]))
+    ref.write_text(">mut\n" + seq + "\n")
+    out = tmp_path / "rep.csv"
+    chrom_cli.main(["verify-clones", "--construct", str(ref), "--region", "7-280",
+                    "--linear", str(reads_dir), "-o", str(out)])
+    shown = capsys.readouterr().out
+    rows = [line.split(",") for line in out.read_text(encoding="utf-8").splitlines()[1:]]
+    assert rows
+    for row in rows:
+        line = next(l for l in shown.splitlines() if l.startswith(row[0] + " "))
+        assert line.rstrip().endswith(f"differences {row[4]}")

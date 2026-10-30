@@ -223,6 +223,11 @@ class CloneReport:
     def region_differences(self) -> tuple[CloneDifference, ...]:
         return tuple(d for d in self.differences if d.in_region)
 
+    @property
+    def error_differences(self) -> tuple[CloneDifference, ...]:
+        """In-region differences that are not low quality: what gives ``errors``."""
+        return tuple(d for d in self.region_differences if d.status != "low_quality")
+
 
 def check_region(region: Region | None, length: int, circular: bool) -> Region:
     """``region`` normalised (``None`` -> whole construct); ``ValueError`` if invalid."""

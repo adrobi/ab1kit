@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from chrom_core.batch import csv_field
-from chrom_core.clones import CloneDifference, CloneReport
+from chrom_core.clones import CloneDifference, CloneReport, ReadResult
 
 # verdict -> (light, dark) hex colours; the single source of the status palette.
 STATUS_HEX: dict[str, tuple[str, str]] = {
@@ -15,7 +15,7 @@ STATUS_HEX: dict[str, tuple[str, str]] = {
 }
 
 CLONES_HEADER = ("clone", "verdict", "region_coverage_pct", "both_strands_pct",
-                 "differences", "reads")
+                 "differences", "reads", "read_issues")
 DIFFERENCES_HEADER = ("clone", "position", "kind", "ref", "read", "effect",
                       "support", "against", "status", "note")
 
@@ -37,11 +37,24 @@ def _note(d: CloneDifference) -> str:
     return " / ".join(parts)
 
 
+_ERROR_TEXT = {"no_alignment": "did not align to the construct"}
+
+
+def read_issue(read: ReadResult) -> str:
+    """Why a read was left out of the verdict, in plain English; ``""`` if it was used."""
+    if read.error:
+        return _ERROR_TEXT.get(read.error, f"unreadable ({read.error})")
+    return "ambiguous placement" if read.ambiguous else ""
+
+
 def _clone_row(r: CloneReport) -> tuple:
-    # ``reads``: file names of every read of the clone (used or not), joined by "|".
+    # ``reads``: file names of every read of the clone (used or not), joined by "|";
+    # ``differences``: those the verdict counts; ``read_issues``: "name: reason; ...".
     names = "|".join(read.ref.path.name for read in r.reads)
+    issues = "; ".join(f"{read.ref.path.name}: {read_issue(read)}"
+                       for read in r.reads if read_issue(read))
     return (r.clone, r.verdict, round(r.region_coverage_pct, 1), round(r.both_strands_pct, 1),
-            len(r.differences), names)
+            len(r.error_differences), names, issues)
 
 
 def _difference_rows(reports: list[CloneReport]):
@@ -100,7 +113,7 @@ def clone_report_xlsx(path, reports: list[CloneReport], construct_name: str) -> 
                 "solid", start_color=colour, end_color=colour)
     for row in _difference_rows(reports):
         diffs.append(row)
-    for sheet, widths in ((clones, (16, 12, 20, 18, 12, 50)),
+    for sheet, widths in ((clones, (16, 12, 20, 18, 12, 50, 50)),
                           (diffs, (16, 10, 14, 8, 8, 14, 9, 9, 12, 30))):
         for i, width in enumerate(widths):
             sheet.column_dimensions[chr(ord("A") + i)].width = width

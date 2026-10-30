@@ -83,7 +83,8 @@ def _reads_in(folder: str) -> list[Path]:
 
 
 def _verify_clones(args: argparse.Namespace) -> int:
-    from chrom_core.clone_report import clone_report_xlsx, clones_csv, differences_csv
+    from chrom_core.clone_report import (
+        clone_report_xlsx, clones_csv, differences_csv, read_issue)
     from chrom_core.clones import VerifyParams, check_region, group_reads, verify_all
     from chrom_core.reference import load_construct
 
@@ -111,6 +112,10 @@ def _verify_clones(args: argparse.Namespace) -> int:
         raise CliError("no reads could be assigned to a clone")
     params = VerifyParams(min_q=args.min_q, het_ratio=args.het_ratio)
     reports = verify_all(construct, region, grouping, params)
+    for report in reports:
+        for read in report.reads:
+            if read_issue(read):
+                print(f"ab1kit: {read.ref.path.name}: {read_issue(read)}", file=sys.stderr)
 
     if out.suffix.lower() == ".xlsx":
         clone_report_xlsx(out, reports, construct.name)
@@ -122,7 +127,7 @@ def _verify_clones(args: argparse.Namespace) -> int:
     width = max(len(r.clone) for r in reports)
     for r in reports:
         print(f"{r.clone:<{width}}  {r.verdict:<10}  coverage {r.region_coverage_pct:5.1f}%  "
-              f"differences {len(r.region_differences)}")
+              f"differences {len(r.error_differences)}")
     return 0 if any(r.verdict == "ok" for r in reports) else 1
 
 
