@@ -101,3 +101,9 @@ def test_config_new_fields_and_old_files(tmp_path):
     f = tmp_path / "c.json"
     f.write_text('{"theme": "dark"}', encoding="utf-8")
     assert load_config(f).primer_tokens == list(DEFAULT_PRIMER_TOKENS)
+
+
+def test_natural_sort_with_non_decimal_digits():
+    # "²" is a digit to str.isdigit() but not int()-convertible
+    g = Grouping([ReadRef(Path(f"{c}_F.ab1"), c, "F") for c in ("x1²", "x10", "x2")])
+    assert list(g.clones()) == ["x1²", "x2", "x10"]

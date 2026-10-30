@@ -42,7 +42,7 @@ class ReadRef:
 
 def _natural_key(text: str) -> list:
     return [
-        (0, int(part), "") if part.isdigit() else (1, 0, part.casefold())
+        (0, int(part), "") if part.isdecimal() else (1, 0, part.casefold())
         for part in re.split(r"(\d+)", text)
         if part != ""
     ]
