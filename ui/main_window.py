@@ -193,6 +193,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ tasks
     def _build_task_status(self) -> None:
         self._active_tasks: set[Task] = set()
+        self._keyed_tasks: dict[str, Task] = {}
         self.task_progress = QProgressBar()
         self.task_progress.setMaximumWidth(180)
         self.task_progress.setFormat(tr("task.running"))
@@ -206,10 +207,15 @@ class MainWindow(QMainWindow):
         for task in list(self._active_tasks):
             task.cancel()
 
-    def _start_task(self, fn, on_finished, error_title: str) -> Task:
+    def _start_task(self, fn, on_finished, error_title: str, key: str = "") -> Task:
         """Run ``fn`` in the background; ``on_finished(result)`` runs in the GUI
-        thread unless the task was cancelled or failed."""
+        thread unless the task was cancelled or failed. A new task with the
+        same ``key`` cancels the previous one (last start wins)."""
+        if key and key in self._keyed_tasks:
+            self._keyed_tasks.pop(key).cancel()
         task = run_task(fn, self)
+        if key:
+            self._keyed_tasks[key] = task
         self._active_tasks.add(task)
         self.task_progress.setRange(0, 0)  # busy until progress arrives
         self.task_progress.show()
@@ -217,6 +223,8 @@ class MainWindow(QMainWindow):
 
         def release() -> None:
             self._active_tasks.discard(task)
+            if key and self._keyed_tasks.get(key) is task:
+                del self._keyed_tasks[key]
             if not self._active_tasks:
                 self.task_progress.hide()
                 self.task_cancel_button.hide()
@@ -744,6 +752,7 @@ class MainWindow(QMainWindow):
             lambda progress, is_cancelled: blast_api.submit(params, timeout=20),
             done,
             tr("menu.analysis.blast"),
+            key="blast",
         )
 
     def _switch_language(self, code: str) -> None:
@@ -894,6 +903,7 @@ class MainWindow(QMainWindow):
             lambda progress, is_cancelled: batch.scan_folder(folder, window, min_q),
             done,
             tr("menu.file.open_folder"),
+            key="scan",
         )
 
     def _batch_export(self) -> None:
@@ -1236,6 +1246,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(tr("session.saved"), 3000)
 
     def closeEvent(self, event) -> None:  # noqa: N802
+        self._cancel_tasks()
         if self.read_model is not None and self._path is not None:
             sidecar = sessions.session_path(self._path)
             try:

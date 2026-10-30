@@ -44,7 +44,13 @@ class Task(QObject):
         self._runnable = _Runnable(self)
 
     def cancel(self) -> None:
+        """Request cancellation (call from the GUI thread). ``cancelled`` is
+        emitted at once; whatever the worker produces later is ignored."""
         self._cancel_event.set()
+        if not self._done:
+            self._done = True
+            _running.discard(self)
+            self.cancelled.emit()
 
     def is_cancelled(self) -> bool:
         return self._cancel_event.is_set()
@@ -63,7 +69,7 @@ class Task(QObject):
             return
         self._done = True
         _running.discard(self)
-        if kind == "cancelled" or self.is_cancelled():
+        if kind == "cancelled":
             self.cancelled.emit()
         elif kind == "failed":
             self.failed.emit(str(payload))
@@ -79,17 +85,25 @@ class _Runnable(QRunnable):
 
     def run(self) -> None:
         task = self._task
+        def emit(kind: str, payload: object) -> None:
+            try:
+                task._event.emit(kind, payload)
+            except RuntimeError:  # Task was destroyed with its parent
+                _running.discard(task)
+
         try:
             result = task._fn(
-                lambda done, total: task._event.emit("progress", (int(done), int(total))),
+                lambda done, total: emit("progress", (int(done), int(total))),
                 task.is_cancelled,
             )
         except CancelledError:
-            task._event.emit("cancelled", None)
-        except Exception as exc:  # noqa: BLE001 - reported through ``failed``
-            task._event.emit("failed", str(exc))
+            emit("cancelled", None)
+        except BaseException as exc:  # noqa: BLE001 - reported through ``failed``
+            emit("failed", str(exc) or type(exc).__name__)
         else:
-            task._event.emit("finished", result)
+            emit("finished", result)
+        finally:
+            _running.discard(task)
 
 
 def run_task(fn: TaskFn, parent: QObject) -> Task:

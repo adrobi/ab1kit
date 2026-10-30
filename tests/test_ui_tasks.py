@@ -46,8 +46,6 @@ def _collect(task):
 
 
 def test_result_delivered_in_finished(qapp, parent):
-    from PySide6.QtCore import QObject
-
     from ui.tasks import run_task
 
     task = run_task(lambda progress, is_cancelled: (progress(1, 2), 42)[1], parent)
@@ -58,8 +56,6 @@ def test_result_delivered_in_finished(qapp, parent):
 
 
 def test_exception_goes_to_failed(qapp, parent):
-    from PySide6.QtCore import QObject
-
     from ui.tasks import run_task
 
     def boom(progress, is_cancelled):
@@ -72,8 +68,6 @@ def test_exception_goes_to_failed(qapp, parent):
 
 
 def test_cancel_emits_cancelled_and_drops_result(qapp, parent):
-    from PySide6.QtCore import QObject
-
     from ui.tasks import run_task
 
     def loop(progress, is_cancelled):
@@ -87,13 +81,12 @@ def test_cancel_emits_cancelled_and_drops_result(qapp, parent):
     events = _collect(task)
     task.cancel()
     assert task.is_cancelled()
+    assert events == [("cancelled", None)]  # emitted immediately
     assert _wait(qapp, lambda: bool(events))
     assert events == [("cancelled", None)]
 
 
 def test_cancel_drops_late_result_of_uninterruptible_fn(qapp, parent):
-    from PySide6.QtCore import QObject
-
     from ui.tasks import run_task
 
     task = run_task(lambda p, c: (time.sleep(0.2), "late")[1], parent)
@@ -104,7 +97,7 @@ def test_cancel_drops_late_result_of_uninterruptible_fn(qapp, parent):
 
 
 def test_gui_thread_not_blocked(qapp, parent):
-    from PySide6.QtCore import QObject, QTimer
+    from PySide6.QtCore import QTimer
 
     from ui.tasks import run_task
 
@@ -121,7 +114,7 @@ def test_gui_thread_not_blocked(qapp, parent):
 
 
 def test_signals_delivered_in_gui_thread(qapp, parent):
-    from PySide6.QtCore import QObject, QThread
+    from PySide6.QtCore import QThread
 
     from ui.tasks import run_task
 
@@ -160,4 +153,90 @@ def test_main_window_blast_uses_task_and_cancel_drops_result(qapp, monkeypatch, 
     time.sleep(0.3)
     qapp.processEvents()
     assert opened == []
+    window.close()
+
+
+def test_base_exception_still_terminal(qapp, parent):
+    from ui.tasks import run_task
+
+    def bail(progress, is_cancelled):
+        raise KeyboardInterrupt()
+
+    task = run_task(bail, parent)
+    events = _collect(task)
+    assert _wait(qapp, lambda: bool(events))
+    assert events == [("failed", "KeyboardInterrupt")]
+
+
+def test_parent_deleted_mid_run_is_clean(qapp, capfd):
+    import shiboken6
+    from PySide6.QtCore import QObject
+
+    from ui import tasks
+    from ui.tasks import run_task
+
+    def slow(progress, is_cancelled):
+        time.sleep(0.2)
+        progress(1, 2)
+        raise RuntimeError("after delete")
+
+    parent = QObject()
+    run_task(slow, parent)
+    shiboken6.delete(parent)
+    assert _wait(qapp, lambda: not tasks._running)
+    time.sleep(0.05)
+    assert "Traceback" not in capfd.readouterr().err
+    assert not tasks._running
+
+
+@pytest.mark.skipif(not AB1, reason="no example .ab1 files")
+def test_scan_last_start_wins(qapp, monkeypatch, tmp_path):
+    from chrom_core import batch
+    from chrom_core.config import AppConfig
+    from ui.main_window import MainWindow
+
+    monkeypatch.setattr("ui.main_window.save_config", lambda *a, **k: None)
+    real = batch.scan_folder
+
+    def fake(folder, *a, **k):
+        if folder.name == "slow":
+            time.sleep(0.4)
+            return real(folder.parent, *a, **k)[:1]
+        return real(folder.parent, *a, **k)[:2]
+
+    monkeypatch.setattr(batch, "scan_folder", fake)
+    window = MainWindow(AppConfig(recent_files=[]))
+    window.show()
+    ex = AB1[0].parent
+    window._scan_folder(ex / "slow")
+    window._scan_folder(ex / "fast")
+    assert _wait(qapp, lambda: window.batch_panel.table.rowCount() == min(2, len(AB1)))
+    time.sleep(0.6)
+    qapp.processEvents()
+    assert window.batch_panel.table.rowCount() == min(2, len(AB1))
+    assert not window.task_progress.isVisible()
+    window.close()
+
+
+@pytest.mark.skipif(not AB1, reason="no example .ab1 files")
+def test_second_blast_cancels_first(qapp, monkeypatch):
+    from chrom_core import blast
+    from chrom_core.config import AppConfig
+    from ui.main_window import MainWindow
+
+    monkeypatch.setattr("ui.main_window.save_config", lambda *a, **k: None)
+    opened = []
+    monkeypatch.setattr(
+        "ui.main_window.QDesktopServices.openUrl", lambda url: opened.append(url.toString())
+    )
+    rids = iter(["FIRST", "SECOND"])
+    monkeypatch.setattr(blast, "submit", lambda params, timeout=20: (time.sleep(0.2), next(rids))[1])
+    window = MainWindow(AppConfig(recent_files=[]))
+    assert window.open_path(AB1[0])
+    window._blast_submit()
+    window._blast_submit()
+    assert _wait(qapp, lambda: bool(opened))
+    time.sleep(0.4)
+    qapp.processEvents()
+    assert len(opened) == 1
     window.close()
