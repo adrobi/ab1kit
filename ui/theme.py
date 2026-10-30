@@ -7,6 +7,8 @@ import tempfile
 from functools import lru_cache
 from pathlib import Path
 
+from PySide6.QtGui import QIcon
+
 LIGHT = {
     "bg": "#ffffff",
     "panel": "#f3f3f3",
@@ -61,6 +63,11 @@ def resource_dir() -> Path:
     ``sys._MEIPASS/ui`` in a PyInstaller bundle (see ab1kit.spec datas)."""
     frozen = getattr(sys, "_MEIPASS", None)
     return Path(frozen) / "ui" if frozen else Path(__file__).resolve().parent
+
+
+def app_icon() -> QIcon:
+    """The application icon (``ui/icons/app/ab1kit.png``), frozen-safe."""
+    return QIcon(str(resource_dir() / "icons" / "app" / "ab1kit.png"))
 
 
 @lru_cache(maxsize=2)

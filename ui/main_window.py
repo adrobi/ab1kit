@@ -27,7 +27,7 @@ from ui.construct.workspace import PROJECT_SUFFIX, ConstructWorkspace
 from ui.read_view import ReadView
 from ui.status import bind_icon
 from ui.tasks import Task, run_task
-from ui.theme import app_qss
+from ui.theme import app_icon, app_qss
 
 try:
     VERSION = pkg_version("ab1kit")
@@ -65,6 +65,7 @@ class MainWindow(QMainWindow):
         self.config = config or load_config()
         set_language(self.config.language)
 
+        QApplication.instance().setWindowIcon(app_icon())
         self.setWindowTitle("ab1kit")
         self.resize(1200, 780)
         self.read_view = ReadView(self.config, self._start_task)

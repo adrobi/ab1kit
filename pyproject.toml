@@ -26,7 +26,7 @@ packages = ["chrom_core", "ui", "ui.read_view", "ui.construct"]
 py-modules = ["chrom_cli", "i18n", "translations_en"]
 
 [tool.setuptools.package-data]
-ui = ["style.qss", "style_dark.qss", "icons/*.svg", "icons/LICENSE", "icons/README.md"]
+ui = ["style.qss", "style_dark.qss", "icons/*.svg", "icons/LICENSE", "icons/README.md", "icons/app/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

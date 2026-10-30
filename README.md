@@ -1,4 +1,4 @@
-# ab1kit
+# <img src="ui/icons/app/ab1kit.png" width="48" align="center"> ab1kit
 
 Open-source desktop tool for viewing, editing and analyzing Sanger sequencing
 chromatograms (`.ab1` files) — a free, offline alternative to FinchTV / Chromas
