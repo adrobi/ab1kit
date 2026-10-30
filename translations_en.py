@@ -87,6 +87,8 @@ EN = {
     "tb.zoom_out": "Zoom out",
     "tb.fit": "Fit read",
     "tb.reset": "Reset view",
+    "tb.quality_legend": "Quality Q:",
+    "tb.quality_legend.tip": "Quality bar colours: red Q<20, yellow 20–29, green ≥30",
     "goto.title": "Go to base",
     "goto.label": "Base number",
     "search.title": "Find subsequence",

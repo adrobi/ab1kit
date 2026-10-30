@@ -20,6 +20,8 @@ from chrom_core.config import AppConfig, load_config, save_config
 from i18n import set_language, tr
 from ui.read_view import ReadView
 from ui.tasks import Task, run_task
+from ui import status
+from ui.status import bind_icon
 from ui.theme import app_qss
 
 try:
@@ -140,6 +142,7 @@ class MainWindow(QMainWindow):
         file_menu = self.menuBar().addMenu(tr("menu.file"))
         self._file_menu = file_menu
         open_action = QAction(tr("menu.file.open"), self)
+        bind_icon(open_action, "folder-open")
         open_action.setShortcut("Ctrl+O")
         open_action.triggered.connect(self.read_view.open_dialog)
         file_menu.addAction(open_action)
@@ -159,6 +162,7 @@ class MainWindow(QMainWindow):
 
         view_menu = self.menuBar().addMenu(tr("menu.view"))
         self.dark_action = QAction(tr("menu.view.dark_theme"), self)
+        bind_icon(self.dark_action, "moon")
         self.dark_action.setCheckable(True)
         self.dark_action.setChecked(self.config.theme == "dark")
         self.dark_action.toggled.connect(
@@ -194,6 +198,7 @@ class MainWindow(QMainWindow):
 
     def set_theme(self, name: str) -> None:
         self.config.theme = name
+        status.set_theme(name)
         self.read_view.apply_theme(name)
         QApplication.instance().setStyleSheet(app_qss(name == "dark"))
         save_config(self.config)

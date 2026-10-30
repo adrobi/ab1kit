@@ -6,13 +6,11 @@ from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QCheckBox,
     QDockWidget,
     QFileDialog,
     QHBoxLayout,
-    QHeaderView,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -24,9 +22,10 @@ from chrom_core import batch, export
 from chrom_core.batch import FileReport
 from chrom_core.config import AppConfig
 from i18n import tr
+from ui.tables import configure_table, paint_status, set_full_text_tooltip
 
 STATUS_TEXT = {"ok": "✓", "warn": "⚠", "bad": "✗", "error": "✗"}
-STATUS_COLOR = {"ok": "#1e9e1e", "warn": "#e0a000", "bad": "#e02020", "error": "#e02020"}
+STATUS_VERDICT = {"ok": "ok", "warn": "incomplete", "bad": "errors", "error": "errors"}
 
 
 class BatchPanel(QWidget):
@@ -51,10 +50,7 @@ class BatchPanel(QWidget):
                 tr("batch.col.status"),
             ]
         )
-        self.table.horizontalHeader().setSectionResizeMode(
-            0, QHeaderView.ResizeMode.Stretch
-        )
-        self.table.verticalHeader().setVisible(False)
+        configure_table(self.table)
         self.table.setSortingEnabled(True)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -87,7 +83,8 @@ class BatchPanel(QWidget):
             self._set_item(row, 3, report.q20 if not report.error else "")
             self._set_item(row, 4, report.trimmed_length if not report.error else "")
             status = QTableWidgetItem(STATUS_TEXT[report.status])
-            status.setForeground(QColor(STATUS_COLOR[report.status]))
+            status.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            paint_status(status, STATUS_VERDICT[report.status])
             if report.error:
                 status.setToolTip(report.error)
             self.table.setItem(row, 5, status)
@@ -99,6 +96,7 @@ class BatchPanel(QWidget):
         item.setData(Qt.ItemDataRole.DisplayRole, value)
         if data is not None:
             item.setData(Qt.ItemDataRole.UserRole, data)
+        set_full_text_tooltip(item)
         self.table.setItem(row, col, item)
 
     def _apply_filter(self) -> None:

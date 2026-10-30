@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QDockWidget, QTableWidget, QTableWidgetItem, QWidget
 
 from chrom_core.align import ReadAlignment
 from chrom_core.seqops import reverse_complement
 from i18n import tr
+from ui.tables import configure_table, paint_status, set_full_text_tooltip
 
 
 def reference_overlay(
@@ -36,6 +36,9 @@ def displayed_diff_index(alignment: ReadAlignment, diff, read_length: int) -> in
     return n - diff.read_pos - span
 
 
+DIFF_VERDICT_STATUS = {"homozygous": "ok", "heterozygous": "mixed", "low_quality": "incomplete"}
+
+
 class DiffDock(QDockWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(tr("analysis.diffs.title"), parent)
@@ -52,7 +55,7 @@ class DiffDock(QDockWidget):
                 tr("snp.col.ratio"),
             ]
         )
-        self.diff_table.verticalHeader().setVisible(False)
+        configure_table(self.diff_table)
         self.diff_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.diff_table.setSortingEnabled(True)
         self.setWidget(self.diff_table)
@@ -94,8 +97,9 @@ class DiffDock(QDockWidget):
             for col, value in enumerate(values):
                 item = QTableWidgetItem()
                 item.setData(Qt.ItemDataRole.DisplayRole, value)
-                if call is not None and col == 5 and call.kind == "heterozygous":
-                    item.setForeground(QColor("#a05000"))
+                set_full_text_tooltip(item)
+                if call is not None and col == 5:
+                    paint_status(item, DIFF_VERDICT_STATUS.get(call.kind, "no_data"))
                 self.diff_table.setItem(row, col, item)
         self.diff_table.setSortingEnabled(True)
 

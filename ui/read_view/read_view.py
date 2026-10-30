@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QScrollBar,
+    QSizePolicy,
     QToolBar,
     QVBoxLayout,
     QWidget,
@@ -42,6 +43,8 @@ from ui.read_view.analysis_dock import DiffDock, displayed_diff_index, reference
 from ui.read_view.batch_dock import BatchDock
 from ui.read_view.dialogs import SearchDialog, TrimDialog, ask_reference_text
 from ui.read_view.verify_dock import VerifyDock
+from ui import status
+from ui.status import bind_icon, quality_bucket
 from ui.theme import theme as palette
 
 
@@ -106,21 +109,28 @@ class ReadView(QMainWindow):
     def _build_toolbar(self) -> None:
         bar = QToolBar()
         bar.setMovable(False)
+        bar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.addToolBar(bar)
 
-        def add(text: str, slot, shortcut: str | None = None) -> None:
+        def add(text: str, icon_name: str, slot, shortcut: str | None = None) -> None:
             action = QAction(text, self)
+            bind_icon(action, icon_name)
             if shortcut:
                 action.setShortcut(shortcut)
             action.triggered.connect(slot)
             bar.addAction(action)
 
-        add(tr("tb.open"), self.open_dialog)
+        add(tr("tb.open"), "folder-open", self.open_dialog)
         bar.addSeparator()
-        add(tr("tb.zoom_in"), self.chrom_view.zoom_in, "Ctrl++")
-        add(tr("tb.zoom_out"), self.chrom_view.zoom_out, "Ctrl+-")
-        add(tr("tb.fit"), self.chrom_view.zoom_fit)
-        add(tr("tb.reset"), self.chrom_view.zoom_reset)
+        add(tr("tb.zoom_in"), "zoom-in", self.chrom_view.zoom_in, "Ctrl++")
+        add(tr("tb.zoom_out"), "zoom-out", self.chrom_view.zoom_out, "Ctrl+-")
+        add(tr("tb.fit"), "maximize", self.chrom_view.zoom_fit)
+        add(tr("tb.reset"), "rotate-ccw", self.chrom_view.zoom_reset)
+        bar.addSeparator()
+        bind_icon(self.undo_action, "undo-2")
+        bind_icon(self.redo_action, "redo-2")
+        bar.addAction(self.undo_action)
+        bar.addAction(self.redo_action)
         bar.addSeparator()
         for base in "ACGT":
             box = QCheckBox(base)
@@ -130,6 +140,13 @@ class ReadView(QMainWindow):
             )
             bar.addWidget(box)
             self._channel_boxes[base] = box
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        bar.addWidget(spacer)
+        self.quality_legend = QLabel()
+        self.quality_legend.setToolTip(tr("tb.quality_legend.tip"))
+        bar.addWidget(self.quality_legend)
+        self._refresh_legend("light")
 
     def _build_docks(self) -> None:
         self.info_dock = QDockWidget(tr("info.title"), self)
@@ -459,8 +476,18 @@ class ReadView(QMainWindow):
         self.scrollbar.blockSignals(False)
         self.minimap.set_view(self.chrom_view.offset, visible, total)
 
-    def apply_theme(self, name: str) -> None:
+    def _refresh_legend(self, name: str) -> None:
+        """Small colour key for the quality bars (same thresholds everywhere)."""
         colors = palette(name)
+        parts = [tr("tb.quality_legend")]
+        for q, text in ((0, "&lt;20"), (20, "20–29"), (30, "≥30")):
+            parts.append(f'<span style="color:{colors[quality_bucket(q)]}">■</span>&nbsp;{text}')
+        self.quality_legend.setText("&nbsp;&nbsp;".join(parts))
+
+    def apply_theme(self, name: str) -> None:
+        status.set_theme(name)
+        colors = palette(name)
+        self._refresh_legend(name)
         self.chrom_view.set_theme(colors)
         self.minimap.set_theme(colors)
         for base, box in self._channel_boxes.items():

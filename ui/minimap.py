@@ -7,6 +7,7 @@ from PySide6.QtGui import QColor, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import QWidget
 
 from chrom_core import Chromatogram
+from ui.status import quality_bucket
 from ui.theme import LIGHT
 
 STRIP_H = 18
@@ -107,7 +108,7 @@ class MiniMap(QWidget):
         y = self._strip_y()
         peaks = list(chrom.peak_indices) + [self._total]
         for i, quality in enumerate(chrom.quality):
-            bucket = "low_q" if quality < 10 else "mid_q" if quality < 20 else "high_q"
+            bucket = quality_bucket(quality)
             painter.setBrush(QColor(self.theme[bucket]))
             x0 = self._x(peaks[i])
             x1 = self._x(peaks[i + 1])

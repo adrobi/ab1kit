@@ -390,3 +390,86 @@ def test_bare_read_view_works_without_shell_menus(qapp):
     view.apply_base_change(0, "N")
     assert view.undo_action.isEnabled()
     view.close()
+
+
+# ------------------------------------------------------------------ Task 13: theme
+def test_toolbar_actions_have_icons(qapp):
+    from PySide6.QtWidgets import QToolBar
+
+    from chrom_core.config import AppConfig
+    from ui.main_window import MainWindow
+
+    window = MainWindow(AppConfig(recent_files=[]))
+    bar = window.read_view.findChild(QToolBar)
+    actions = [a for a in bar.actions() if not a.isSeparator() and a.text()]
+    assert actions
+    assert all(not a.icon().isNull() for a in actions), [a.text() for a in actions if a.icon().isNull()]
+    window.close()
+
+
+def test_quality_colour_thresholds_and_palette(qapp):
+    from chrom_core.clone_report import STATUS_HEX
+    from ui.status import quality_color, status_color
+
+    for theme in ("light", "dark"):
+        assert quality_color(15, theme) != quality_color(35, theme)
+        assert quality_color(19, theme) != quality_color(20, theme)
+        assert quality_color(20, theme) == quality_color(29, theme)
+        assert quality_color(29, theme) != quality_color(30, theme)
+        assert quality_color(30, theme) == quality_color(60, theme)
+    for verdict, (light, dark) in STATUS_HEX.items():
+        assert status_color(verdict, "light").name() == light
+        assert status_color(verdict, "dark").name() == dark
+
+
+def test_minimap_and_chrom_view_share_quality_buckets(qapp):
+    from ui.status import quality_bucket
+
+    assert [quality_bucket(q) for q in (0, 19, 20, 29, 30, 99)] == [
+        "low_q", "low_q", "mid_q", "mid_q", "high_q", "high_q"]
+
+
+def test_status_chip_is_label(qapp):
+    from PySide6.QtWidgets import QLabel
+
+    from ui.status import status_chip
+
+    chip = status_chip("ok", "OK")
+    assert isinstance(chip, QLabel) and chip.text() == "OK"
+    assert "border-radius" in chip.styleSheet()
+
+
+def test_stylesheet_applies_in_both_themes(qapp):
+    from chrom_core.config import AppConfig
+    from ui.main_window import MainWindow
+
+    window = MainWindow(AppConfig(recent_files=[]))
+    seen = []
+    for name in ("light", "dark"):
+        window.set_theme(name)
+        assert qapp.styleSheet().strip()
+        seen.append(qapp.styleSheet())
+    assert seen[0] != seen[1]
+    window.close()
+
+
+def test_tables_stretch_last_column_and_tooltip_notes(qapp):
+    from PySide6.QtWidgets import QHeaderView
+
+    from chrom_core.config import AppConfig
+    from ui.main_window import MainWindow
+
+    sample = next(p for p in AB1 if "3730" in p.name)
+    window = MainWindow(AppConfig(recent_files=[]))
+    assert window.open_path(sample)
+    seq = "".join(window.read_model.seq)
+    ref = seq[100:400]
+    window._set_reference_seq(ref)
+    wrong = "A" if ref[50] != "A" else "C"
+    window._verify_variants(f"name;pos;ref;alt\nsnp;51;{wrong};T\n")
+    for table in (window.verify_table, window.diff_table, window.batch_panel.table):
+        assert table.horizontalHeader().stretchLastSection()
+        assert table.horizontalHeader().sectionResizeMode(0) != QHeaderView.ResizeMode.Fixed
+    note = window.verify_table.item(0, 7)
+    assert note.text() and note.toolTip() == note.text()
+    window.close()

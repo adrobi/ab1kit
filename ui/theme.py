@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import sys
+from functools import lru_cache
+from pathlib import Path
+
 LIGHT = {
     "bg": "#ffffff",
     "panel": "#f3f3f3",
@@ -37,20 +41,20 @@ def theme(name: str) -> dict:
     return DARK if name == "dark" else LIGHT
 
 
+def resource_dir() -> Path:
+    """Folder holding style*.qss and icons/: next to this module, or under
+    ``sys._MEIPASS/ui`` in a PyInstaller bundle (see ab1kit.spec datas)."""
+    frozen = getattr(sys, "_MEIPASS", None)
+    return Path(frozen) / "ui" if frozen else Path(__file__).resolve().parent
+
+
+@lru_cache(maxsize=2)
+def _read_qss(dark: bool) -> str:
+    name = "style_dark.qss" if dark else "style.qss"
+    return (resource_dir() / name).read_text(encoding="utf-8")
+
+
 def app_qss(dark: bool) -> str:
-    """Application stylesheet. Both themes set explicit colors so the chrome
-    never depends on the OS light/dark mode (native dark Windows makes our
-    fixed light-theme text colors unreadable)."""
-    if dark:
-        return (
-            "QWidget { background-color: #252526; color: #d4d4d4; }"
-            "QMenuBar, QMenu, QToolBar { background-color: #2d2d30; }"
-            "QLineEdit, QSpinBox { background-color: #1e1e1e; }"
-            "QDockWidget::title { background-color: #2d2d30; }"
-        )
-    return (
-        "QWidget { background-color: #f3f3f3; color: #1a1a1a; }"
-        "QMenuBar, QMenu, QToolBar { background-color: #e9e9e9; }"
-        "QLineEdit, QSpinBox { background-color: #ffffff; }"
-        "QDockWidget::title { background-color: #e9e9e9; }"
-    )
+    """Application stylesheet (ui/style.qss or ui/style_dark.qss). Both themes set
+    explicit colours so the chrome never depends on the OS light/dark mode."""
+    return _read_qss(dark)

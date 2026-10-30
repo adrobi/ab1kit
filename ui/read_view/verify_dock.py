@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QDockWidget,
     QHBoxLayout,
@@ -15,6 +14,18 @@ from PySide6.QtWidgets import (
 )
 
 from i18n import tr
+from ui.tables import configure_table, paint_status, set_full_text_tooltip
+
+
+VERIFY_VERDICT_STATUS = {
+    "confirmed": "ok",
+    "heterozygous": "mixed",
+    "not_found": "errors",
+    "ref_mismatch": "errors",
+    "low_quality": "incomplete",
+    "no_data": "no_data",
+    "unsupported": "no_data",
+}
 
 
 class VerifyDock(QDockWidget):
@@ -33,7 +44,7 @@ class VerifyDock(QDockWidget):
                 tr("verify.col.note"),
             ]
         )
-        self.verify_table.verticalHeader().setVisible(False)
+        configure_table(self.verify_table)
         self.verify_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.verify_table.setSortingEnabled(True)
         buttons = QWidget()
@@ -60,11 +71,6 @@ class VerifyDock(QDockWidget):
             "low_quality": tr("verify.low_quality"),
             "unsupported": tr("verify.unsupported"),
         }
-        colors = {
-            "confirmed": "#1e9e1e",
-            "heterozygous": "#e0a000",
-            "not_found": "#e02020",
-        }
         self.verify_table.setSortingEnabled(False)
         self.verify_table.setRowCount(len(verdicts))
         for row, v in enumerate(verdicts):
@@ -81,7 +87,8 @@ class VerifyDock(QDockWidget):
             for col, value in enumerate(values):
                 item = QTableWidgetItem()
                 item.setData(Qt.ItemDataRole.DisplayRole, value)
-                if col == 4 and v.verdict in colors:
-                    item.setForeground(QColor(colors[v.verdict]))
+                set_full_text_tooltip(item)
+                if col == 4:
+                    paint_status(item, VERIFY_VERDICT_STATUS.get(v.verdict, "no_data"))
                 self.verify_table.setItem(row, col, item)
         self.verify_table.setSortingEnabled(True)
