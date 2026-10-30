@@ -7,6 +7,8 @@ truth, also used by the XLSX report). Quality colours come from the theme dicts;
 
 from __future__ import annotations
 
+import weakref
+
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
@@ -21,7 +23,7 @@ Q_HIGH = 30   # Q at or above this is green; in between is yellow
 _ICON_SIZES = (16, 20, 24, 32, 48)
 _current_theme = "light"
 _icon_cache: dict[tuple[str, str], QIcon] = {}
-_bound: list[tuple[QAction, str]] = []
+_bound: list[tuple[weakref.ref, str]] = []
 
 
 def quality_bucket(q: int) -> str:
@@ -87,7 +89,7 @@ def icon(name: str) -> QIcon:
 def bind_icon(action: QAction, name: str) -> None:
     """Give ``action`` the icon and keep it tinted when the theme changes."""
     action.setIcon(icon(name))
-    _bound.append((action, name))
+    _bound.append((weakref.ref(action), name))
 
 
 def set_theme(name: str) -> None:
@@ -95,10 +97,13 @@ def set_theme(name: str) -> None:
     global _current_theme
     _current_theme = "dark" if name == "dark" else "light"
     alive = []
-    for action, icon_name in _bound:
+    for ref, icon_name in _bound:
+        action = ref()
+        if action is None:
+            continue
         try:
             action.setIcon(icon(icon_name))
         except RuntimeError:  # underlying QAction already deleted
             continue
-        alive.append((action, icon_name))
+        alive.append((ref, icon_name))
     _bound[:] = alive

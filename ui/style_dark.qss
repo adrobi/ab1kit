@@ -52,6 +52,6 @@ QStatusBar { background-color: #2d2d30; border-top: 1px solid #3f3f46; }
 QStatusBar::item { border: none; }
 QCheckBox { spacing: 6px; background: transparent; }
 QCheckBox::indicator { width: 14px; height: 14px; border: 1px solid #8a8f98; border-radius: 3px; background-color: #1e1e1e; }
-QCheckBox::indicator:checked { background-color: #2f6fed; border-color: #2f6fed; }
+QCheckBox::indicator:checked { background-color: #2f6fed; border-color: #2f6fed; image: url(@TICK@); }
 QCheckBox::indicator:disabled { border-color: #3f3f46; }
 QLabel { background: transparent; }

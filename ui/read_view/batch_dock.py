@@ -50,7 +50,7 @@ class BatchPanel(QWidget):
                 tr("batch.col.status"),
             ]
         )
-        configure_table(self.table)
+        configure_table(self.table, stretch_column=0)
         self.table.setSortingEnabled(True)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)

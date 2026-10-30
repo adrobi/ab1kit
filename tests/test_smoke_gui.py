@@ -467,9 +467,85 @@ def test_tables_stretch_last_column_and_tooltip_notes(qapp):
     window._set_reference_seq(ref)
     wrong = "A" if ref[50] != "A" else "C"
     window._verify_variants(f"name;pos;ref;alt\nsnp;51;{wrong};T\n")
-    for table in (window.verify_table, window.diff_table, window.batch_panel.table):
+    for table in (window.verify_table, window.diff_table):
         assert table.horizontalHeader().stretchLastSection()
         assert table.horizontalHeader().sectionResizeMode(0) != QHeaderView.ResizeMode.Fixed
     note = window.verify_table.item(0, 7)
-    assert note.text() and note.toolTip() == note.text()
+    assert len(note.text()) > 40 and note.toolTip() == note.text()
     window.close()
+
+
+def test_status_cells_repaint_on_theme_switch(qapp):
+    from chrom_core.config import AppConfig
+    from ui.main_window import MainWindow
+    from ui.status import status_color
+
+    sample = next(p for p in AB1 if "3730" in p.name)
+    window = MainWindow(AppConfig(recent_files=[], theme="light"))
+    assert window.open_path(sample)
+    seq = "".join(window.read_model.seq)
+    ref = seq[100:400]
+    window._set_reference_seq(ref)
+    wrong = "A" if ref[50] != "A" else "C"
+    window._verify_variants(f"name;pos;ref;alt\nsnp;51;{wrong};T\n")
+    cell = window.verify_table.item(0, 4)
+    assert cell.background().color() == status_color("errors", "light")
+    window.set_theme("dark")
+    assert cell.background().color() == status_color("errors", "dark")
+    window.close()
+
+
+def test_icon_pixmap_changes_with_theme(qapp):
+    from PySide6.QtGui import QAction
+
+    from ui import status
+
+    action = QAction("x")
+    status.bind_icon(action, "undo-2")
+    try:
+        status.set_theme("light")
+        light = action.icon().pixmap(24, 24).toImage()
+        status.set_theme("dark")
+        dark = action.icon().pixmap(24, 24).toImage()
+        assert light != dark
+    finally:
+        status.set_theme("light")
+
+
+def test_channel_checkboxes_use_channel_colours_and_tick(qapp):
+    from chrom_core.config import AppConfig
+    from ui.main_window import MainWindow
+    from ui.theme import theme as palette
+
+    window = MainWindow(AppConfig(recent_files=[]))
+    for name in ("light", "dark"):
+        window.set_theme(name)
+        for base, box in window.read_view._channel_boxes.items():
+            sheet = box.styleSheet()
+            colour = palette(name)["bases"][base]
+            assert f"QCheckBox::indicator:checked {{ background-color: {colour}" in sheet
+            assert "image: url(" in sheet
+    assert "image: url(" in qapp.styleSheet()
+    window.close()
+
+
+def test_batch_table_stretches_file_column(qapp):
+    from PySide6.QtWidgets import QHeaderView
+
+    from ui.read_view.batch_dock import BatchPanel
+
+    panel = BatchPanel()
+    header = panel.table.horizontalHeader()
+    assert header.sectionResizeMode(0) == QHeaderView.ResizeMode.Stretch
+    assert not header.stretchLastSection()
+
+
+def test_tooltips_only_on_long_cells(qapp):
+    from PySide6.QtWidgets import QTableWidgetItem
+
+    from ui.tables import set_full_text_tooltip
+
+    short, long_ = QTableWidgetItem("12"), QTableWidgetItem("x" * 60)
+    set_full_text_tooltip(short)
+    set_full_text_tooltip(long_)
+    assert short.toolTip() == "" and long_.toolTip() == "x" * 60

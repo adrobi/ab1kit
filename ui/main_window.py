@@ -18,10 +18,10 @@ from PySide6.QtWidgets import (
 
 from chrom_core.config import AppConfig, load_config, save_config
 from i18n import set_language, tr
-from ui.read_view import ReadView
-from ui.tasks import Task, run_task
 from ui import status
+from ui.read_view import ReadView
 from ui.status import bind_icon
+from ui.tasks import Task, run_task
 from ui.theme import app_qss
 
 try:

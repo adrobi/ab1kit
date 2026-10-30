@@ -36,6 +36,7 @@ from chrom_core.snps import call_snps
 from chrom_core.verify import parse_expected, verify_expected, verdicts_csv, verdicts_xlsx
 from chrom_core.seqops import find_matches
 from i18n import tr
+from ui import status
 from ui.chrom_view import ChromatogramWidget
 from ui.minimap import MiniMap
 from ui.read_view import menus
@@ -43,9 +44,9 @@ from ui.read_view.analysis_dock import DiffDock, displayed_diff_index, reference
 from ui.read_view.batch_dock import BatchDock
 from ui.read_view.dialogs import SearchDialog, TrimDialog, ask_reference_text
 from ui.read_view.verify_dock import VerifyDock
-from ui import status
 from ui.status import bind_icon, quality_bucket
-from ui.theme import theme as palette
+from ui.tables import repaint_statuses
+from ui.theme import theme as palette, tick_image
 
 
 class ReadView(QMainWindow):
@@ -491,9 +492,15 @@ class ReadView(QMainWindow):
         self.chrom_view.set_theme(colors)
         self.minimap.set_theme(colors)
         for base, box in self._channel_boxes.items():
+            c = colors["bases"][base]
             box.setStyleSheet(
-                f"QCheckBox {{ color: {colors['bases'][base]}; font-weight: bold; padding: 0 4px; }}"
+                f"QCheckBox {{ color: {c}; font-weight: bold; padding: 0 4px; }}"
+                f"QCheckBox::indicator {{ border: 1px solid {c}; }}"
+                f"QCheckBox::indicator:checked {{ background-color: {c}; border-color: {c};"
+                f" image: url({tick_image(c)}); }}"
             )
+        for table in (self.diff_table, self.verify_table, self.batch_panel.table):
+            repaint_statuses(table)
 
     # --------------------------------------------------------------- editing
     def _sync_actions(self) -> None:

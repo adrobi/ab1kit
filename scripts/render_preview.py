@@ -20,7 +20,7 @@ from chrom_core import batch, read_ab1  # noqa: E402
 from ui.chrom_view import ChromatogramWidget  # noqa: E402
 
 
-def render_window(src: Path, out: Path, theme: str) -> None:
+def render_window(src: Path, out: Path, theme: str, uncheck: str = "") -> None:
     from chrom_core.config import AppConfig
     from ui.main_window import MainWindow
 
@@ -37,6 +37,8 @@ def render_window(src: Path, out: Path, theme: str) -> None:
     window._set_reference_seq("".join(ref))
     rows = ["name;pos;ref;alt", f"snp1;51;{seq[150]};T", f"snp2;121;{seq[220]};G"]
     window._verify_variants("\n".join(rows) + "\n")
+    for base in uncheck:
+        window.read_view._channel_boxes[base].setChecked(False)
     window.batch_dock.show()
     window.batch_panel.show_reports(batch.scan_folder(src.parent))
     for _ in range(20):
@@ -54,6 +56,11 @@ def main() -> None:
         i = argv.index("--theme")
         theme = argv[i + 1]
         del argv[i:i + 2]
+    uncheck = ""
+    if "--uncheck" in argv:
+        i = argv.index("--uncheck")
+        uncheck = argv[i + 1]
+        del argv[i:i + 2]
     window_mode = "--window" in argv
     argv = [a for a in argv if a != "--window"]
     src = Path(argv[0]) if argv else examples[0]
@@ -61,7 +68,7 @@ def main() -> None:
 
     app = QApplication([])
     if window_mode:
-        render_window(src, out, theme)
+        render_window(src, out, theme, uncheck)
         return
     view = ChromatogramWidget()
     view.resize(1200, 700)
