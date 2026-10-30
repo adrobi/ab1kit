@@ -84,6 +84,8 @@ def test_frameshift_and_inframe():
     assert difference_effect(c, ins1) == "frameshift"
     assert difference_effect(c, ins3) == "inframe_ins"
     assert difference_effect(c, del1) == "frameshift"
+    del3 = replace(del1, ref_base=c.seq[pos:pos + 3])
+    assert difference_effect(c, del3) == "inframe_del"
 
 
 def test_minus_strand_cds():

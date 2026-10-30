@@ -362,6 +362,37 @@ def _status(support: int, against: int) -> str:
     return "disputed" if against else "confirmed"
 
 
+def _deletion_runs(found: dict, length: int, circular: bool):
+    """``(differences, showing reads, their Q)`` per merged difference, in position order.
+
+    Consecutive deleted positions shown by the same set of reads form one run
+    (across the origin on a circular construct); every other difference is a
+    run of one. A run's flanking Q is the same at each of its positions.
+    """
+    entries = []                 # (sort key, run, showing, quals)
+    deletions = []               # (position, run, showing, quals, read ids)
+    for key in sorted(found):
+        d, showing, quals = found[key]
+        if d.kind != "deletion":
+            entries.append((key, [d], showing, quals))
+            continue
+        ids = frozenset(map(id, showing))
+        last = deletions[-1] if deletions else None
+        if last is not None and last[4] == ids and last[1][-1].ref_pos + 1 == d.ref_pos:
+            last[1].append(d)
+        else:
+            deletions.append((d.ref_pos, [d], showing, quals, ids))
+    if (circular and len(deletions) > 1 and deletions[0][0] == 0
+            and deletions[-1][1][-1].ref_pos == length - 1
+            and deletions[0][4] == deletions[-1][4]):
+        deletions[-1][1].extend(deletions.pop(0)[1])
+    for pos, run, showing, quals, _ids in deletions:
+        entries.append(((pos, "deletion", "-"), run, showing, quals))
+    entries.sort(key=lambda e: e[0])
+    for _key, run, showing, quals in entries:
+        yield run, showing, quals
+
+
 def _verdict(used, mixed, differences, coverage, params: VerifyParams) -> str:
     if not used:
         return "no_data"
@@ -425,15 +456,16 @@ def verify_clone(
                 entry[2].append(r.difference_q(d))
 
     differences = []
-    for key in sorted(found):
-        d, showing, quals = found[key]
+    for run, showing, quals in _deletion_runs(found, L, construct.circular):
+        d = run[0]
         support = sum(1 for q in quals if q >= params.min_q)
-        against = sum(1 for r in used
-                      if r not in showing and r.shows_reference(d, ref, params.min_q))
-        inside = d.ref_pos in in_region or (
+        against = sum(1 for r in used if r not in showing
+                      and all(r.shows_reference(x, ref, params.min_q) for x in run))
+        inside = any(x.ref_pos in in_region for x in run) or (
             d.kind == "insertion" and (d.ref_pos - 1) % L in in_region)
+        ref_base = "".join(x.ref_base for x in run)
         cd = CloneDifference(
-            d.ref_pos, d.kind, d.ref_base, d.read_base, support, against,
+            d.ref_pos, d.kind, ref_base, d.read_base, support, against,
             len(quals) - support, _status(support, against), inside,
         )
         if annotate is not None:

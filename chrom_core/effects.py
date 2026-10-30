@@ -35,10 +35,9 @@ def difference_effect(construct: Construct, diff: CloneDifference) -> str:
     Substitution: ``"synonymous"``, ``"D45N"`` (one-letter codes, amino-acid
     number counted from the CDS start, frame from ``codon_start``) or
     ``"W12*"`` for a stop. Insertion/deletion: ``"frameshift"`` when the length
-    is not a multiple of 3, else ``"inframe_ins"`` / ``"inframe_del"``. The
-    length is that of this one ``CloneDifference``: a multi-base deletion
-    arrives as several one-base differences, each of which is reported as
-    ``"frameshift"``. ``""`` outside any CDS, with no features, or when the
+    is not a multiple of 3, else ``"inframe_ins"`` / ``"inframe_del"``; a
+    multi-base deletion arrives as one ``CloneDifference`` whose ``ref_base`` is
+    the whole deleted run. ``""`` outside any CDS, with no features, or when the
     read base is not A/C/G/T or the codon is incomplete.
     """
     seq = construct.seq.upper()

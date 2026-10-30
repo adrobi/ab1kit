@@ -106,6 +106,30 @@ def test_insertion_and_deletion_found(coi):
     assert r.verdict == "errors"
 
 
+def _coi_with_extra(bases: str) -> Construct:
+    """Annotated COI with ``bases`` inserted before ``P`` (CDS stretched to match):
+    the unmodified reads then show a ``len(bases)``-bp deletion inside the CDS."""
+    c = load_construct(DATA / "refs" / "coi_HM417896.gb")
+    cds = next(f for f in c.features if f.kind == "CDS")
+    assert (P - cds.start - (cds.codon_start - 1)) % 3 == 0   # codon-aligned
+    features = tuple(replace(f, end=f.end + len(bases)) if f.end > P else f
+                     for f in c.features)
+    return replace(c, seq=mutate(c.seq.upper(), P, "ins", bases), features=features)
+
+
+@pytest.mark.parametrize("extra, effect", [
+    ("GCT", "inframe_del"), ("G", "frameshift"), ("GC", "frameshift")])
+def test_multi_base_deletion_is_one_difference(extra, effect):
+    construct = _coi_with_extra(extra)
+    r = verify_clone(construct, (6, 647 + len(extra)), _reads())
+    d, = r.region_differences
+    assert (d.kind, d.read_base, d.status, d.support) == ("deletion", "-", "confirmed", 2)
+    assert len(d.ref_base) == len(extra)
+    assert construct.seq[d.ref_pos:d.ref_pos + len(extra)].upper() == d.ref_base
+    assert d.effect == effect
+    assert r.verdict == "errors"
+
+
 def test_disputed_when_reads_disagree(coi, tmp_path):
     # A C peak 4x the called A under P, then the call edited to C: the trace
     # agrees with the edit (no artificial double peak at P).
@@ -384,3 +408,21 @@ def test_performance_12_clones_x_4_reads(coi):
     assert all(r.verdict != "no_data" for r in reports)
     assert not any(x.ambiguous or x.error for r in reports for x in r.reads)
     assert elapsed < LIMIT
+
+
+def test_deletion_runs_split_by_reads_and_join_across_origin():
+    from chrom_core.align import Difference
+
+    a, b = object(), object()
+
+    def dels(*specs):
+        return {(p, "deletion", "-"): (Difference(p, "deletion", "ACGTACGTAC"[p], "-", None),
+                                       list(reads), [30] * len(reads))
+                for p, reads in specs}
+
+    found = dels((0, [a]), (1, [a]), (4, [a, b]), (5, [a]), (8, [a]), (9, [a]))
+    found[(3, "substitution", "T")] = (Difference(3, "substitution", "T", "A", 3), [a], [30])
+    runs = lambda circ: [("".join(d.ref_base for d in run), run[0].ref_pos)
+                         for run, _s, _q in clones._deletion_runs(found, 10, circ)]
+    assert runs(False) == [("AC", 0), ("T", 3), ("A", 4), ("C", 5), ("AC", 8)]
+    assert runs(True) == [("T", 3), ("A", 4), ("C", 5), ("ACAC", 8)]
