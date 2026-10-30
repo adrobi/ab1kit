@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMenu,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QScrollBar,
     QSpinBox,
@@ -46,6 +47,7 @@ from i18n import set_language, tr
 from ui.batch_panel import BatchPanel
 from ui.chrom_view import ChromatogramWidget
 from ui.minimap import MiniMap
+from ui.tasks import Task, run_task
 from ui.theme import app_qss, theme as palette
 
 try:
@@ -185,7 +187,62 @@ class MainWindow(QMainWindow):
         self.setAcceptDrops(True)
         self.set_theme(self.config.theme)
         self.statusBar().showMessage(tr("status.ready"))
+        self._build_task_status()
         self._fill_recent_menu()
+
+    # ------------------------------------------------------------------ tasks
+    def _build_task_status(self) -> None:
+        self._active_tasks: set[Task] = set()
+        self.task_progress = QProgressBar()
+        self.task_progress.setMaximumWidth(180)
+        self.task_progress.setFormat(tr("task.running"))
+        self.task_cancel_button = QPushButton(tr("task.cancel"))
+        self.task_cancel_button.clicked.connect(self._cancel_tasks)
+        for widget in (self.task_progress, self.task_cancel_button):
+            self.statusBar().addPermanentWidget(widget)
+            widget.hide()
+
+    def _cancel_tasks(self) -> None:
+        for task in list(self._active_tasks):
+            task.cancel()
+
+    def _start_task(self, fn, on_finished, error_title: str) -> Task:
+        """Run ``fn`` in the background; ``on_finished(result)`` runs in the GUI
+        thread unless the task was cancelled or failed."""
+        task = run_task(fn, self)
+        self._active_tasks.add(task)
+        self.task_progress.setRange(0, 0)  # busy until progress arrives
+        self.task_progress.show()
+        self.task_cancel_button.show()
+
+        def release() -> None:
+            self._active_tasks.discard(task)
+            if not self._active_tasks:
+                self.task_progress.hide()
+                self.task_cancel_button.hide()
+
+        def on_progress(done: int, total: int) -> None:
+            if total > 0:
+                self.task_progress.setRange(0, total)
+                self.task_progress.setValue(done)
+
+        def on_failed(message: str) -> None:
+            release()
+            QMessageBox.warning(self, error_title, message)
+
+        def on_cancelled() -> None:
+            release()
+            self.statusBar().showMessage(tr("task.cancelled"), 5000)
+
+        def on_done(result: object) -> None:
+            release()
+            on_finished(result)
+
+        task.progress.connect(on_progress)
+        task.failed.connect(on_failed)
+        task.cancelled.connect(on_cancelled)
+        task.finished.connect(on_done)
+        return task
 
     # ------------------------------------------------------------------ setup
     def _build_toolbar(self) -> None:
@@ -673,12 +730,21 @@ class MainWindow(QMainWindow):
             return
         seq = "".join(self.read_model.seq)
         try:
-            rid = blast_api.submit(blast_api.build_request(seq))
+            params = blast_api.build_request(seq)
         except (OSError, RuntimeError, ValueError) as exc:
             QMessageBox.warning(self, tr("menu.analysis.blast"), str(exc))
             return
-        QDesktopServices.openUrl(QUrl(blast_api.result_url(rid)))
-        self.statusBar().showMessage(tr("blast.sent", rid=rid), 10000)
+
+        def done(rid: object) -> None:
+            QDesktopServices.openUrl(QUrl(blast_api.result_url(str(rid))))
+            self.statusBar().showMessage(tr("blast.sent", rid=rid), 10000)
+
+        # urllib cannot be interrupted: on cancel the late RID is dropped.
+        self._start_task(
+            lambda progress, is_cancelled: blast_api.submit(params, timeout=20),
+            done,
+            tr("menu.analysis.blast"),
+        )
 
     def _switch_language(self, code: str) -> None:
         self.config.language = code
@@ -812,12 +878,23 @@ class MainWindow(QMainWindow):
             self._scan_folder(Path(folder))
 
     def _scan_folder(self, folder: Path) -> None:
-        self.batch_reports = batch.scan_folder(
-            folder, self.config.trim_window, self.config.trim_min_q
+        window, min_q = self.config.trim_window, self.config.trim_min_q
+
+        def done(reports: object) -> None:
+            self.batch_reports = reports  # type: ignore[assignment]
+            self.batch_panel.show_reports(self.batch_reports)
+            self.batch_dock.show()
+            self.statusBar().showMessage(
+                tr("batch.scan_done", n=len(self.batch_reports)), 5000
+            )
+
+        # scan_folder reports no progress and is not interruptible: on cancel
+        # its late result is dropped and the table stays as it was.
+        self._start_task(
+            lambda progress, is_cancelled: batch.scan_folder(folder, window, min_q),
+            done,
+            tr("menu.file.open_folder"),
         )
-        self.batch_panel.show_reports(self.batch_reports)
-        self.batch_dock.show()
-        self.statusBar().showMessage(tr("batch.scan_done", n=len(self.batch_reports)), 5000)
 
     def _batch_export(self) -> None:
         if not self.batch_reports:

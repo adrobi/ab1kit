@@ -29,6 +29,16 @@ def no_config_writes(monkeypatch, tmp_path):
     monkeypatch.setattr(sessions, "session_path", lambda _p: tmp_path / "session.json")
 
 
+def _wait_for(app, predicate, timeout=5.0):
+    import time
+
+    deadline = time.monotonic() + timeout
+    while not predicate() and time.monotonic() < deadline:
+        app.processEvents()
+        time.sleep(0.005)
+    assert predicate()
+
+
 def test_entry_point_importable():
     from chrom_cli import main
     from ui.main_window import MainWindow, run
@@ -156,6 +166,7 @@ def test_batch_panel_flow(qapp, monkeypatch, tmp_path):
     window = MainWindow(AppConfig(recent_files=[]))
     window.show()
     window._scan_folder(EXAMPLES)
+    _wait_for(qapp, lambda: window.batch_panel.table.rowCount() > 0)
 
     assert window.batch_dock.isVisible()
     assert window.batch_panel.table.rowCount() == len(AB1)
