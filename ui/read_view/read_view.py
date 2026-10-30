@@ -46,7 +46,7 @@ from ui.read_view.dialogs import SearchDialog, TrimDialog, ask_reference_text
 from ui.read_view.verify_dock import VerifyDock
 from ui.status import bind_icon, quality_bucket
 from ui.tables import repaint_statuses
-from ui.theme import theme as palette, tick_image
+from ui.theme import image_rule, theme as palette, tick_image
 
 
 class ReadView(QMainWindow):
@@ -498,7 +498,7 @@ class ReadView(QMainWindow):
                 f"QCheckBox {{ color: {c}; font-weight: bold; padding: 0 4px; }}"
                 f"QCheckBox::indicator {{ border: 1px solid {c}; }}"
                 f"QCheckBox::indicator:checked {{ background-color: {c}; border-color: {c};"
-                f" image: url({tick_image(c)}); }}"
+                f" {image_rule(tick_image(c))} }}"
             )
         for table in (self.diff_table, self.verify_table, self.batch_panel.table):
             repaint_statuses(table)

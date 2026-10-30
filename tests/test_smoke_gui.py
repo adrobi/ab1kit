@@ -548,6 +548,33 @@ def test_channel_checkboxes_use_channel_colours_and_tick(qapp):
     window.close()
 
 
+def test_unwritable_temp_falls_back_to_no_tick_image(qapp, monkeypatch, tmp_path):
+    import tempfile
+
+    from chrom_core.config import AppConfig
+    from ui import theme
+    from ui.main_window import MainWindow
+
+    def fail(*_a, **_k):
+        raise OSError("read-only temp")
+
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path / "nowhere"))
+    monkeypatch.setattr(Path, "mkdir", fail)
+    assert theme.tick_image("#2f6fed") == ""
+    for dark in (False, True):
+        qss = theme.app_qss(dark)
+        assert "@" not in qss.replace("@media", "") and "url()" not in qss
+    window = MainWindow(AppConfig(recent_files=[]))
+    window.set_theme("dark")
+    assert all("url(" not in box.styleSheet()
+               for box in window.read_view._channel_boxes.values())
+    window.close()
+    monkeypatch.undo()
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+    monkeypatch.setattr(Path, "write_text", fail)
+    assert theme.tick_image("#2f6fed") == ""
+
+
 def test_batch_table_stretches_file_column(qapp):
     from PySide6.QtWidgets import QHeaderView
 

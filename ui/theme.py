@@ -78,16 +78,25 @@ def _read_qss(dark: bool) -> str:
 
 def tinted_icon(name: str, color: str, stroke: str = "2") -> str:
     """Path of icon ``name`` (``ui/icons/<name>.svg``) drawn in ``color``, for QSS
-    ``image: url(...)``. Written once per icon and colour to the temp folder."""
+    ``image: url(...)``. Written once per icon and colour to the temp folder;
+    ``""`` when that folder cannot be written (see ``image_rule``)."""
     folder = Path(tempfile.gettempdir()) / "ab1kit_icons"
-    folder.mkdir(exist_ok=True)
     target = folder / f"{name}_{color.lstrip('#')}_{stroke}.svg"
-    if not target.exists():
-        svg = (resource_dir() / "icons" / f"{name}.svg").read_text(encoding="utf-8")
-        target.write_text(svg.replace("currentColor", color)
-                          .replace('stroke-width="2"', f'stroke-width="{stroke}"'),
-                          encoding="utf-8")
+    try:
+        folder.mkdir(exist_ok=True)
+        if not target.exists():
+            svg = (resource_dir() / "icons" / f"{name}.svg").read_text(encoding="utf-8")
+            target.write_text(svg.replace("currentColor", color)
+                              .replace('stroke-width="2"', f'stroke-width="{stroke}"'),
+                              encoding="utf-8")
+    except OSError:
+        return ""
     return target.as_posix()
+
+
+def image_rule(path: str) -> str:
+    """QSS ``image: url(path);``, or nothing for a missing (``""``) image."""
+    return f"image: url({path});" if path else ""
 
 
 def tick_image(background: str) -> str:
@@ -102,6 +111,7 @@ def app_qss(dark: bool) -> str:
     explicit colours so the chrome never depends on the OS light/dark mode."""
     arrow = theme("dark" if dark else "light")["text"]
     return (_read_qss(dark)
-            .replace("@TICK@", tick_image("#2f6fed"))
-            .replace("@UP@", tinted_icon("chevron-up", arrow, "3"))
-            .replace("@DOWN@", tinted_icon("chevron-down", arrow, "3")))
+            .replace("image: url(@TICK@);", image_rule(tick_image("#2f6fed")))
+            .replace("image: url(@UP@);", image_rule(tinted_icon("chevron-up", arrow, "3")))
+            .replace("image: url(@DOWN@);",
+                     image_rule(tinted_icon("chevron-down", arrow, "3"))))
