@@ -193,4 +193,7 @@ EN = {
     "effect.frameshift": "frameshift",
     "effect.inframe_ins": "in-frame insertion",
     "effect.inframe_del": "in-frame deletion",
+    "detail.err.no_alignment": "no alignment",
+    "detail.ambiguous": "ambiguous — not counted in the verdict",
+    "detail.uncovered": "position not covered",
 }

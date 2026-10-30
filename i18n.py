@@ -200,6 +200,9 @@ RU = {
     "effect.frameshift": "сдвиг рамки",
     "effect.inframe_ins": "вставка в рамке",
     "effect.inframe_del": "делеция в рамке",
+    "detail.err.no_alignment": "нет выравнивания",
+    "detail.ambiguous": "неоднозначно — не учитывается в вердикте",
+    "detail.uncovered": "позиция не покрыта",
 }
 
 _lang = "ru"

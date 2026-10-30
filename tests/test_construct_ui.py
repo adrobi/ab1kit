@@ -453,7 +453,7 @@ def test_displayed_index_converts_once_for_both_strands():
     assert displayed_index(minus, 50, 10) is None        # not covered
     # a deleted position falls back to the nearest mapped neighbour
     gap = al("+", {5: 3, 7: 4})
-    assert displayed_index(gap, 6, 10) in (3, 4)
+    assert displayed_index(gap, 6, 10) == 4
 
 
 def test_pane_one_chromatogram_per_aligned_read(qapp, construct, pane_report):
@@ -517,9 +517,94 @@ def test_pane_effect_labels_translated(qapp, construct, pane_report):
     assert pane.table.item(1, 2).text() == "D45N"
 
 
+def test_pane_status_cells_keep_one_colour_per_meaning(qapp, construct, pane_report):
+    from dataclasses import replace
+    from ui import status
+
+    d = pane_report.differences[0]
+    diffs = tuple(replace(d, status=s) for s in ("confirmed", "disputed", "low_quality"))
+    pane = _pane(qapp, construct, replace(pane_report, differences=diffs))
+    bg = [pane.table.item(r, 4).background().color() for r in range(3)]
+    red = status.status_color("errors", "light")
+    assert bg[0] == red
+    assert bg[1] != red and bg[1].red() > bg[1].green() and bg[1].red() > bg[1].blue()   # weaker red tint
+    assert bg[1] != status.status_color("incomplete", "light")
+    assert bg[2] == status.status_color("no_data", "light")
+    pane.set_theme("dark")
+    assert pane.table.item(0, 4).background().color() == status.status_color("errors", "dark")
+
+
+def test_pane_dims_rows_outside_region(qapp, construct, pane_report):
+    from dataclasses import replace
+    from i18n import tr
+
+    d = pane_report.differences[0]
+    pane = _pane(qapp, construct, replace(pane_report, differences=(d, replace(d, in_region=False))))
+    inside, outside = pane.table.item(0, 0), pane.table.item(1, 0)
+    assert not inside.font().italic() and inside.toolTip() == ""
+    assert outside.font().italic() and outside.toolTip() == tr("matrix.legend.outside")
+    assert outside.foreground().color() != inside.foreground().color()
+
+
+def test_pane_zoom_is_shared_and_kept(qapp, construct, pane_report):
+    pane = _pane(qapp, construct, pane_report)
+    views = pane.views()
+    assert len({v.zoom for v in views}) == 1
+    views[0].zoom_in()                           # before any position is shown
+    assert views[1].zoom == views[0].zoom
+    pane.show_position(P)
+    chosen = views[0].zoom
+    assert views[1].zoom == chosen               # show_position keeps the user's zoom
+    views[0].zoom_in()
+    assert views[1].zoom == views[0].zoom > chosen
+    for result, view in zip(pane_report.reads, views):
+        n = len(view.chrom.seq)
+        idx = result.alignment.ref_to_read[P]
+        want = idx if result.alignment.strand == "+" else n - 1 - idx
+        centre = view.offset + view.width() / view.zoom / 2
+        assert abs(centre - view.chrom.peak_indices[want]) <= 1.0
+    pane.resize(1100, 500)
+    assert views[0].zoom == views[1].zoom and views[0].zoom != chosen
+
+
+def test_pane_failed_and_ambiguous_reads_are_shown(qapp, construct, pane_report):
+    from dataclasses import replace
+    from PySide6.QtWidgets import QLabel
+    from chrom_core.clones import ReadResult
+    from i18n import tr
+
+    f, r = pane_report.reads
+    bad = ReadResult(ReadRef(Path("bad_read.ab1"), "c1", "F"), None, error="no_alignment")
+    report = replace(pane_report, reads=(f, bad, replace(r, ambiguous=True)))
+    pane = _pane(qapp, construct, report)
+    assert len(pane.views()) == 2
+    texts = [lab.text() for lab in pane.findChildren(QLabel)]
+    assert any("bad_read.ab1" in s and tr("detail.err.no_alignment") in s for s in texts)
+    assert tr("detail.ambiguous") in pane.views()[1].toolTip()
+    assert tr("detail.ambiguous") not in pane.views()[0].toolTip()
+    gone = ReadResult(ReadRef(Path("missing.ab1"), "c1", "F"), r.alignment)
+    pane = _pane(qapp, construct, replace(pane_report, reads=(f, gone)))
+    assert len(pane.views()) == 1
+    assert any("missing.ab1" in lab.text() for lab in pane.findChildren(QLabel))
+
+
+def test_pane_dims_read_that_does_not_cover_position(qapp, construct, pane_report):
+    pane = _pane(qapp, construct, pane_report)
+    covers = pane_report.reads[1].alignment
+    outside = next(p for p in range(len(construct.seq)) if not covers.covers(p)
+                   and pane_report.reads[0].alignment.covers(p))
+    pane.show_position(outside)
+    assert pane.views()[1].graphicsEffect() is not None
+    assert pane.views()[1].highlights == []
+    assert pane.views()[0].graphicsEffect() is None
+    pane.show_position(P)
+    assert pane.views()[1].graphicsEffect() is None
+
+
 def test_pane_renders_png(qapp, construct, pane_report):
+    target = os.environ.get("AB1KIT_DETAIL_PNG")
+    if not target:
+        pytest.skip("set AB1KIT_DETAIL_PNG to render the pane")
     pane = _pane(qapp, construct, pane_report)
     pane.show_position(P)
-    out = Path(__file__).resolve().parents[1] / ".superpowers/sdd/2026-10-25-clone-verification/task-15-light.png"
-    if out.parent.is_dir():
-        assert pane.grab().save(str(out))
+    assert pane.grab().save(target)
