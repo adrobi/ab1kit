@@ -24,6 +24,7 @@ def no_config_writes(monkeypatch, tmp_path):
     """Keep tests away from the real config and from session sidecars next to
     the example files (closing a modified window autosaves one)."""
     monkeypatch.setattr("ui.main_window.save_config", lambda *a, **k: None)
+    monkeypatch.setattr("ui.read_view.read_view.save_config", lambda *a, **k: None)
     from chrom_core import sessions
 
     monkeypatch.setattr(sessions, "session_path", lambda _p: tmp_path / "session.json")
@@ -78,7 +79,7 @@ def test_open_broken_file_shows_error(qapp, monkeypatch):
 
     shown = {}
     monkeypatch.setattr(
-        "ui.main_window.QMessageBox.critical",
+        "ui.read_view.read_view.QMessageBox.critical",
         lambda *a, **k: shown.setdefault("called", True),
     )
     window = MainWindow(AppConfig(recent_files=[]))
@@ -131,7 +132,7 @@ def test_trim_dialog_wiring(qapp, monkeypatch):
 
     warned = {}
     monkeypatch.setattr(
-        "ui.main_window.QMessageBox.warning",
+        "ui.read_view.read_view.QMessageBox.warning",
         lambda *a, **k: warned.setdefault("called", True),
     )
     sample = next(p for p in AB1 if "3730" in p.name)  # high-quality read
@@ -160,7 +161,7 @@ def test_batch_panel_flow(qapp, monkeypatch, tmp_path):
     from ui.main_window import MainWindow
 
     monkeypatch.setattr(
-        "ui.main_window.QFileDialog.getExistingDirectory",
+        "ui.read_view.read_view.QFileDialog.getExistingDirectory",
         lambda *a, **k: str(tmp_path / "export"),
     )
     window = MainWindow(AppConfig(recent_files=[]))
@@ -216,7 +217,7 @@ def test_reference_alignment_flow(qapp, monkeypatch, tmp_path):
 
     out = tmp_path / "aligned.fasta"
     monkeypatch.setattr(
-        "ui.main_window.QFileDialog.getSaveFileName",
+        "ui.read_view.read_view.QFileDialog.getSaveFileName",
         lambda *a, **k: (str(out), "FASTA (*.fasta)"),
     )
     window._export_aligned()
@@ -267,7 +268,7 @@ def test_expected_snp_verification_flow(qapp, monkeypatch, tmp_path):
 
     out = tmp_path / "report.csv"
     monkeypatch.setattr(
-        "ui.main_window.QFileDialog.getSaveFileName",
+        "ui.read_view.read_view.QFileDialog.getSaveFileName",
         lambda *a, **k: (str(out), "CSV (*.csv)"),
     )
     window._save_verify_csv()
@@ -347,4 +348,23 @@ def test_reverse_read_reference_overlay_in_displayed_orientation(qapp):
         ref_pos = int(window.diff_table.item(row, 0).text()) - 1
         if shown and ref_pos in mapping:
             assert int(shown) - 1 == mapping[ref_pos]
+    window.close()
+
+
+@pytest.mark.skipif(not AB1, reason="no example .ab1 files")
+def test_read_view_emits_read_edited_on_edit_and_undo(qapp):
+    from chrom_core.config import AppConfig
+    from ui.main_window import MainWindow
+
+    window = MainWindow(AppConfig(recent_files=[]))
+    emitted = []
+    window.read_view.read_edited.connect(emitted.append)
+    assert window.read_view.open_path(AB1[0])
+    assert emitted == []  # opening is not an edit
+    assert window.read_view.current_model() is window.read_model
+
+    window.read_view.apply_base_change(0, "N")
+    assert emitted == [Path(AB1[0])]
+    window.read_view.undo_read()
+    assert emitted == [Path(AB1[0])] * 2
     window.close()

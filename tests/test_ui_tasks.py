@@ -132,9 +132,11 @@ def test_main_window_blast_uses_task_and_cancel_drops_result(qapp, monkeypatch, 
     from ui.main_window import MainWindow
 
     monkeypatch.setattr("ui.main_window.save_config", lambda *a, **k: None)
+
+    monkeypatch.setattr("ui.read_view.read_view.save_config", lambda *a, **k: None)
     opened = []
     monkeypatch.setattr(
-        "ui.main_window.QDesktopServices.openUrl", lambda url: opened.append(url)
+        "ui.read_view.read_view.QDesktopServices.openUrl", lambda url: opened.append(url)
     )
     monkeypatch.setattr(blast, "submit", lambda params, timeout=20: (time.sleep(0.2), "RID1")[1])
     window = MainWindow(AppConfig(recent_files=[]))
@@ -196,6 +198,8 @@ def test_scan_last_start_wins(qapp, monkeypatch, tmp_path):
     from ui.main_window import MainWindow
 
     monkeypatch.setattr("ui.main_window.save_config", lambda *a, **k: None)
+
+    monkeypatch.setattr("ui.read_view.read_view.save_config", lambda *a, **k: None)
     real = batch.scan_folder
 
     def fake(folder, *a, **k):
@@ -225,9 +229,11 @@ def test_second_blast_cancels_first(qapp, monkeypatch):
     from ui.main_window import MainWindow
 
     monkeypatch.setattr("ui.main_window.save_config", lambda *a, **k: None)
+
+    monkeypatch.setattr("ui.read_view.read_view.save_config", lambda *a, **k: None)
     opened = []
     monkeypatch.setattr(
-        "ui.main_window.QDesktopServices.openUrl", lambda url: opened.append(url.toString())
+        "ui.read_view.read_view.QDesktopServices.openUrl", lambda url: opened.append(url.toString())
     )
     rids = iter(["FIRST", "SECOND"])
     monkeypatch.setattr(blast, "submit", lambda params, timeout=20: (time.sleep(0.2), next(rids))[1])
