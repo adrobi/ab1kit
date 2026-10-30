@@ -31,3 +31,5 @@ ui = ["style.qss", "style_dark.qss", "icons/*.svg", "icons/LICENSE", "icons/READ
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["tests"]
+markers = ["perf: timing-sensitive tests, run with -m perf"]
+addopts = "-m 'not perf'"

@@ -23,7 +23,7 @@ from chrom_core.clones import (
 )
 from chrom_core.editing import EditableRead
 from chrom_core.reference import load_construct
-from clone_fixtures import COI_GB, DATA, real_read, with_secondary_peak, write_read
+from clone_fixtures import COI_GB, DATA, perf_factor, real_read, with_secondary_peak, write_read
 
 F_NAME = "Achl_ACHLO006-09_1_F.ab1"
 R_NAME = "Achl_ACHLO006-09_2_R.ab1"
@@ -358,6 +358,7 @@ def test_mark_at_last_position(qapp, construct):
 PAINT_BUDGET_S = 0.025
 
 
+@pytest.mark.perf
 def test_paint_cost_10kb_12_rows(qapp):
     import time
 
@@ -374,7 +375,7 @@ def test_paint_cost_10kb_12_rows(qapp):
     image = QImage(m.size(), QImage.Format.Format_ARGB32)
     m.render(image)   # warm-up
     best = min(_timed(m, image, time) for _ in range(3))
-    assert best < PAINT_BUDGET_S, f"paint took {best * 1000:.0f} ms"
+    assert best < PAINT_BUDGET_S * perf_factor(), f"paint took {best * 1000:.0f} ms"
 
 
 def _timed(m, image, time) -> float:

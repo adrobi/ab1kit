@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import struct
 from dataclasses import replace
@@ -31,6 +32,11 @@ SAMPLE_REFERENCE: dict[str, str] = {
 }
 PUC19_GB = DATA / "refs" / "pUC19_L09137.gb"
 SNAPGENE_DNA = DATA / "refs" / "sample-d.dna"
+
+
+def perf_factor() -> float:
+    """Multiplier for timing bounds (``AB1KIT_PERF_FACTOR``, default 1) on slow machines."""
+    return float(os.environ.get("AB1KIT_PERF_FACTOR", "1"))
 
 
 def real_read(name: str) -> Chromatogram:

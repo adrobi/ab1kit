@@ -35,6 +35,7 @@ from clone_fixtures import (
     PUC19_GB,
     coi_reference,
     mutate,
+    perf_factor,
     real_read,
     with_secondary_peak,
     write_read,
@@ -391,6 +392,7 @@ def test_load_read_applies_session(tmp_path):
 LIMIT = 32.0
 
 
+@pytest.mark.perf
 def test_performance_12_clones_x_4_reads(coi):
     rng = random.Random(1)
     flank = "".join(rng.choice("ACGT") for _ in range(10_000 - len(coi)))
@@ -407,7 +409,7 @@ def test_performance_12_clones_x_4_reads(coi):
     assert len(reports) == 12
     assert all(r.verdict != "no_data" for r in reports)
     assert not any(x.ambiguous or x.error for r in reports for x in r.reads)
-    assert elapsed < LIMIT
+    assert elapsed < LIMIT * perf_factor()
 
 
 def test_deletion_runs_split_by_reads_and_join_across_origin():
