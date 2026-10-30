@@ -191,6 +191,15 @@ RU = {
     "matrix.legend.outside": "вне региона",
     "matrix.empty": "Нет клонов для показа",
     "matrix.hint": "Колёсико — масштаб, перетаскивание — сдвиг, Shift+протяжка по референсу — задать регион",
+    "detail.col.pos": "Позиция",
+    "detail.col.change": "Реф.→чтение",
+    "detail.col.effect": "Эффект",
+    "detail.col.support": "За / против",
+    "detail.col.status": "Статус",
+    "effect.synonymous": "синонимичная",
+    "effect.frameshift": "сдвиг рамки",
+    "effect.inframe_ins": "вставка в рамке",
+    "effect.inframe_del": "делеция в рамке",
 }
 
 _lang = "ru"

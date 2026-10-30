@@ -184,4 +184,13 @@ EN = {
     "matrix.legend.outside": "outside region",
     "matrix.empty": "No clones to show",
     "matrix.hint": "Wheel: zoom, drag: pan, Shift+drag on the reference: set the region",
+    "detail.col.pos": "Position",
+    "detail.col.change": "Ref→read",
+    "detail.col.effect": "Effect",
+    "detail.col.support": "For / against",
+    "detail.col.status": "Status",
+    "effect.synonymous": "synonymous",
+    "effect.frameshift": "frameshift",
+    "effect.inframe_ins": "in-frame insertion",
+    "effect.inframe_del": "in-frame deletion",
 }

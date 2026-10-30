@@ -8,6 +8,7 @@ through editing sessions (``write_read``), as in ``test_clone_verify``.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -405,3 +406,120 @@ def test_twelve_rows_fit_in_600_px(qapp, construct):
     m.resize(900, 600)
     assert m.row_rect("clone_12").bottom() < 600
     assert m.hit_test(m.mark_point("clone_2", 100)) == ("clone_2", 100)
+
+
+# ------------------------------------------------------------------ detail pane
+
+
+@pytest.fixture(scope="module")
+def pane_report(construct, tmp_path_factory):
+    """ACHLO006-09: F (+) and R (-) with a substitution at P in F's session."""
+    folder = tmp_path_factory.mktemp("pane")
+    i = _f_index(construct, P)
+    chrom = real_read(F_NAME)
+    base = "C" if chrom.seq[i] != "C" else "G"
+    chrom = with_secondary_peak(chrom, i, base, 4.0)
+    edited = EditableRead(chrom)
+    edited.set_base(i, base)
+    f_sub = write_read(edited.current(), folder, F_NAME)
+    out = verify_all(construct, REGION, Grouping([ReadRef(f_sub, "c1", "F"), ReadRef(R, "c1", "R")]))
+    report = out[0]
+    assert [r.alignment.strand for r in report.reads] == ["+", "-"]
+    assert [d.ref_pos for d in report.region_differences] == [P]
+    return report
+
+
+def _pane(qapp, construct, report):
+    from ui.construct.detail_pane import DetailPane
+
+    pane = DetailPane()
+    pane.resize(1000, 500)
+    pane.show_clone(report, construct)
+    return pane
+
+
+def test_displayed_index_converts_once_for_both_strands():
+    from chrom_core.align import ReadAlignment
+    from ui.construct.detail_pane import displayed_index
+
+    def al(strand, mapping):
+        return ReadAlignment(strand=strand, score=0, ref_start=0, ref_end=10, read_start=0, read_end=10,
+                             ref_to_read=mapping, differences=[], identity=1.0, alternatives=1,
+                             oriented_read="", blocks=[], ref_length=100)
+
+    plus, minus = al("+", {5: 3, 6: 4}), al("-", {5: 3, 6: 4})
+    assert displayed_index(plus, 5, 10) == 3
+    assert displayed_index(minus, 5, 10) == 10 - 1 - 3
+    assert displayed_index(minus, 50, 10) is None        # not covered
+    # a deleted position falls back to the nearest mapped neighbour
+    gap = al("+", {5: 3, 7: 4})
+    assert displayed_index(gap, 6, 10) in (3, 4)
+
+
+def test_pane_one_chromatogram_per_aligned_read(qapp, construct, pane_report):
+    pane = _pane(qapp, construct, pane_report)
+    assert len(pane.views()) == 2
+    assert pane.table.rowCount() == len(pane_report.differences)
+
+
+def test_pane_centres_every_read_on_the_position(qapp, construct, pane_report):
+    pane = _pane(qapp, construct, pane_report)
+    pane.show_position(P)
+    for result, view in zip(pane_report.reads, pane.views()):
+        n = len(view.chrom.seq)
+        idx = result.alignment.ref_to_read[P]
+        want = idx if result.alignment.strand == "+" else n - 1 - idx
+        assert view.highlights == [(want, want + 1)]
+        centre = view.offset + view.width() / view.zoom / 2
+        assert abs(centre - view.chrom.peak_indices[want]) <= 1.0
+        letters, mapping = view.reference
+        assert mapping[P] == want
+        assert len({v.zoom for v in pane.views()}) == 1   # shared scale
+
+
+def test_pane_reference_strip_shows_neighbourhood(qapp, construct, pane_report):
+    pane = _pane(qapp, construct, pane_report)
+    pane.show_position(P)
+    text = pane.reference_text()
+    assert construct.seq[P - 10:P] in text and construct.seq[P + 1:P + 11] in text
+    assert f"[{construct.seq[P]}]" in text
+
+
+def test_pane_table_row_selection_shows_position(qapp, construct, pane_report):
+    pane = _pane(qapp, construct, pane_report)
+    seen = []
+    orig = pane.show_position
+    pane.show_position = lambda p: (seen.append(p), orig(p))
+    pane.table.selectRow(0)
+    assert seen[-1] == P == pane_report.differences[0].ref_pos
+    assert pane.table.item(0, 0).text() == str(P + 1)
+    assert "→" in pane.table.item(0, 1).text()
+
+
+def test_pane_double_click_opens_read(qapp, construct, pane_report):
+    pane = _pane(qapp, construct, pane_report)
+    opened = []
+    pane.open_read.connect(opened.append)
+    view = pane.views()[1]
+    _send_mouse(view, QEvent.Type.MouseButtonDblClick, QPoint(20, 20),
+                Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton)
+    assert opened == [pane_report.reads[1].ref.path]
+
+
+def test_pane_effect_labels_translated(qapp, construct, pane_report):
+    from dataclasses import replace
+    from i18n import tr
+
+    d = pane_report.differences[0]
+    report = replace(pane_report, differences=(replace(d, effect="frameshift"), replace(d, effect="D45N")))
+    pane = _pane(qapp, construct, report)
+    assert pane.table.item(0, 2).text() == tr("effect.frameshift")
+    assert pane.table.item(1, 2).text() == "D45N"
+
+
+def test_pane_renders_png(qapp, construct, pane_report):
+    pane = _pane(qapp, construct, pane_report)
+    pane.show_position(P)
+    out = Path(__file__).resolve().parents[1] / ".superpowers/sdd/2026-10-25-clone-verification/task-15-light.png"
+    if out.parent.is_dir():
+        assert pane.grab().save(str(out))
