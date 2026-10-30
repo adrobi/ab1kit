@@ -49,6 +49,59 @@ for everyday molecular biology lab work. English/Russian interface.
 ![dark theme](docs/screenshots/viewer-dark.png)
 ![batch mode](docs/screenshots/batch.png)
 
+## Clone verification
+
+Check a set of plasmid or amplicon clones against the expected construct from
+their Sanger reads: open the clone-verification workspace, load the reference (FASTA,
+GenBank or SnapGene), drop the `.ab1` reads of the whole plate, optionally set
+the region of interest, and read the verdict per clone off the colour matrix.
+
+![clone verification](docs/screenshots/construct.png)
+
+**Scenario.** Load the construct, add the reads (files or a folder), check the
+automatic grouping into clones, choose the region; every clone gets its verdict right away. Click a
+difference in the matrix to see the stacked chromatograms of every read at that
+position. Export the result as Excel/CSV, or save the whole session as an
+`.ab1proj` file. FASTA constructs are treated as circular (reads may span the
+origin); GenBank/SnapGene files take the topology from the file; the *Circular*
+checkbox (`--linear` on the command line) overrides the topology.
+
+**File names.** Reads are grouped by name as `<clone>_<primer>`: the primer is
+the last known primer token (`F`, `R`, `T7`, `SP6`, `M13F`, `pUC-F`, ...), the
+clone is what precedes it, minus an order digit and a leading plate well:
+`A05_clone3_2_R.ab1` is clone `clone3`, primer `R`; `Achl_ACHLO006-09_1_F.ab1`
+is clone `Achl_ACHLO006-09`. Files whose name yields no clone stay unassigned
+and are skipped. For other conventions give a regular expression with named
+groups `clone` and `primer` that matches the whole file name without the
+extension, e.g. `(?P<clone>\d+)-(?P<primer>[A-Za-z0-9]+)`.
+
+**Verdicts.**
+
+| Verdict | Meaning |
+| --- | --- |
+| `ok` (green) | the region is covered and no reliable difference from the construct |
+| `errors` (red) | at least one difference in the region, supported by a read of Q >= min Q |
+| `incomplete` (yellow) | no difference, but part of the region is not covered by any read |
+| `mixed` (purple) | at least 3 positions (default) with a double peak: probably a mixed colony |
+| `no_data` (grey) | no read of the clone aligned to the construct |
+
+A difference is *confirmed* (only supporting reads), *disputed* (another read
+shows the reference there) or *low quality* (seen only below min Q; does not
+change the verdict). Defaults: min Q 20, double-peak ratio 0.40.
+
+**Command line** (no GUI, no Qt needed):
+
+```
+ab1kit verify-clones --construct pET28-gene.gb --region 120-1850 reads/ -o report.xlsx
+ab1kit qc reads/ -o qc.csv
+ab1kit export reads/ --trim --fasta -o trimmed/
+```
+
+`verify-clones` prints a table of clones and exits with 0 if at least one clone
+is `ok`, 1 if none is, 2 on invalid input; `-o report.csv` writes `report.csv`
+and `report_differences.csv`. Options: `--region A-B` (1-based, inclusive),
+`--linear`, `--pattern REGEX`, `--min-q N`, `--het-ratio X`.
+
 ## Getting started
 
 Requires Python 3.11+:
@@ -97,5 +150,6 @@ Example chromatograms in `examples/` come from the
 
 ## Status
 
-v1.0.0 — viewer, editing, trimming, batch mode, alignment, SNP calling and
-expected-SNP verification are all implemented. See [CHANGELOG.md](CHANGELOG.md).
+v1.1.0 — adds clone verification, a command-line interface, a refreshed UI
+and more accurate peak analysis on top of the 1.0 viewer, editing, batch mode,
+alignment, SNP calling and expected-SNP verification. See [CHANGELOG.md](CHANGELOG.md).
