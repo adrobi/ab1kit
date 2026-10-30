@@ -608,3 +608,26 @@ def test_pane_renders_png(qapp, construct, pane_report):
     pane = _pane(qapp, construct, pane_report)
     pane.show_position(P)
     assert pane.grab().save(target)
+
+
+def test_pane_survives_corrupt_ab1(qapp, construct, pane_report, tmp_path):
+    from dataclasses import replace
+    from PySide6.QtWidgets import QLabel
+    from chrom_core.abif import read_ab1
+    from chrom_core.clones import ReadResult
+
+    raw = bytearray((Path(__file__).resolve().parents[1] / "examples" / "310.ab1").read_bytes())
+    directory = int.from_bytes(raw[26:30], "big")
+    raw[directory + 12] ^= 0xFF          # deterministic: BioPython's ABIF parser asserts
+    corrupt = tmp_path / "corrupt.ab1"
+    corrupt.write_bytes(raw)
+    with pytest.raises(AssertionError):
+        read_ab1(corrupt)
+
+    f, r = pane_report.reads
+    broken = ReadResult(ReadRef(corrupt, "c1", "F"), f.alignment)
+    pane = _pane(qapp, construct, replace(pane_report, reads=(broken, r)))
+    assert len(pane.views()) == 1
+    assert any("corrupt.ab1" in lab.text() for lab in pane.findChildren(QLabel))
+    pane.show_position(P)
+    assert pane.views()[0].highlights

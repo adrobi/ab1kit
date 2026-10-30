@@ -28,7 +28,7 @@ VIEW_HEIGHT = 190        # compact height of one chromatogram
 ROW_STATUS = {"confirmed": "errors", "disputed": "errors", "low_quality": "no_data"}
 STATUS_KEY = {"confirmed": "matrix.legend.confirmed", "disputed": "matrix.legend.disputed",
               "low_quality": "matrix.legend.low_quality"}
-READ_ERRORS = (OSError, ValueError, KeyError, TypeError, struct.error)
+READ_ERRORS = (OSError, ValueError, KeyError, TypeError, IndexError, AssertionError, struct.error)  # AssertionError: BioPython ABIF parser on corrupt files
 DISPUTED_TINT = 0.35     # share of the errors red mixed into the background
 UNCOVERED_OPACITY = 0.35
 EFFECT_CODES = ("synonymous", "frameshift", "inframe_ins", "inframe_del")
