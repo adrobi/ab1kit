@@ -67,27 +67,30 @@ origin); GenBank/SnapGene files take the topology from the file; the *Circular*
 checkbox (`--linear` on the command line) overrides the topology.
 
 **File names.** Reads are grouped by name as `<clone>_<primer>`: the primer is
-the last known primer token (`F`, `R`, `T7`, `SP6`, `M13F`, `pUC-F`, ...), the
-clone is what precedes it, minus an order digit and a leading plate well:
-`A05_clone3_2_R.ab1` is clone `clone3`, primer `R`; `Achl_ACHLO006-09_1_F.ab1`
-is clone `Achl_ACHLO006-09`. Files whose name yields no clone stay unassigned
-and are skipped. For other conventions give a regular expression with named
-groups `clone` and `primer` that matches the whole file name without the
-extension, e.g. `(?P<clone>\d+)-(?P<primer>[A-Za-z0-9]+)`.
+the last known primer token (`F`, `R`, `T7`, `SP6`, `M13F`, `pUC-F`, ...); if
+the name has none, the last token is taken as the primer. The clone is what
+precedes the primer, minus a single-digit order token and a leading plate well
+(`A05`), the well being stripped only when another clone token follows it
+(`B2_F` is clone `B2`). `A05_clone3_2_R.ab1` is clone `clone3`, primer `R`;
+`Achl_ACHLO006-09_1_F.ab1` is clone `Achl_ACHLO006-09`. Files whose name yields
+no clone stay unassigned and are skipped. For other conventions give a regular
+expression with named groups `clone` and `primer` that matches the whole file
+name without the extension, e.g. `(?P<clone>\d+)-(?P<primer>[A-Za-z0-9]+)`.
 
-**Verdicts.**
+**Verdicts.** Checked in this order, the first match wins:
 
 | Verdict | Meaning |
 | --- | --- |
-| `ok` (green) | the region is covered and no reliable difference from the construct |
-| `errors` (red) | at least one difference in the region, supported by a read of Q >= min Q |
-| `incomplete` (yellow) | no difference, but part of the region is not covered by any read |
-| `mixed` (purple) | at least 3 positions (default) with a double peak: probably a mixed colony |
 | `no_data` (grey) | no read of the clone aligned to the construct |
+| `mixed` (purple) | at least 3 positions (default) with a double peak: probably a mixed colony |
+| `errors` (red) | at least one difference in the region that is confirmed or disputed |
+| `incomplete` (yellow) | no such difference, but part of the region is not covered by any read |
+| `ok` (green) | the region is fully covered and shows no reliable difference |
 
-A difference is *confirmed* (only supporting reads), *disputed* (another read
-shows the reference there) or *low quality* (seen only below min Q; does not
-change the verdict). Defaults: min Q 20, double-peak ratio 0.40.
+A difference is *confirmed* (only supporting reads, Q >= min Q), *disputed*
+(another read shows the reference there) or *low quality* (seen only below
+min Q). Both confirmed and disputed differences give `errors`; only low-quality
+ones do not change the verdict. Defaults: min Q 20, double-peak ratio 0.40.
 
 **Command line** (no GUI, no Qt needed):
 
@@ -101,6 +104,14 @@ ab1kit export reads/ --trim --fasta -o trimmed/
 is `ok`, 1 if none is, 2 on invalid input; `-o report.csv` writes `report.csv`
 and `report_differences.csv`. Options: `--region A-B` (1-based, inclusive),
 `--linear`, `--pattern REGEX`, `--min-q N`, `--het-ratio X`.
+
+The exit-code contract applies to the `ab1kit` command installed with pip. The
+Windows release `ab1kit.exe` is a windowed program: the shell returns to the
+prompt immediately, so exit codes and output ordering are unreliable and output
+may appear after the prompt. Wait for it explicitly: `start /wait ab1kit.exe
+verify-clones ...` (cmd), or `Start-Process -Wait -NoNewWindow` /
+`(Start-Process ab1kit.exe -ArgumentList ... -Wait -PassThru).ExitCode`
+(PowerShell).
 
 ## Getting started
 

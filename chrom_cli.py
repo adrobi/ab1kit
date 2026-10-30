@@ -16,21 +16,32 @@ class CliError(Exception):
     """Bad input: reported on stderr, exit code 2."""
 
 
-def _prepare_streams() -> None:
-    """Print Cyrillic safely on any console; attach to the parent console if windowed."""
-    if sys.stdout is None or sys.stderr is None:  # frozen windowed build
-        try:
-            import ctypes
+def _attach_console() -> None:
+    """Frozen windowed build: reuse the parent console, writing in its own code page."""
+    try:
+        import ctypes
 
-            if ctypes.windll.kernel32.AttachConsole(-1):
-                if sys.stdout is None:
-                    sys.stdout = open("CONOUT$", "w", encoding="utf-8", errors="replace")
-                if sys.stderr is None:
-                    sys.stderr = open("CONOUT$", "w", encoding="utf-8", errors="replace")
-        except (AttributeError, OSError):
-            pass
+        kernel32 = ctypes.windll.kernel32
+        if not kernel32.AttachConsole(-1):
+            return
+        encoding = f"cp{kernel32.GetConsoleOutputCP()}"  # never change the user's code page
+        if sys.stdout is None:
+            sys.stdout = open("CONOUT$", "w", encoding=encoding, errors="replace")
+        if sys.stderr is None:
+            sys.stderr = open("CONOUT$", "w", encoding=encoding, errors="replace")
+    except (AttributeError, OSError):
+        pass
+
+
+def _prepare_streams() -> None:
+    """Print Cyrillic safely on any console."""
+    attached = sys.stdout is None or sys.stderr is None
+    if attached:
+        _attach_console()
     for stream in (sys.stdout, sys.stderr):
-        if stream is not None and hasattr(stream, "reconfigure"):
+        # an attached console stream keeps the console's own code page
+        if stream is not None and hasattr(stream, "reconfigure") and not (
+                attached and getattr(stream, "name", "") == "CONOUT$"):
             stream.reconfigure(encoding="utf-8", errors="replace")
 
 
@@ -62,6 +73,9 @@ def _verify_clones(args: argparse.Namespace) -> int:
         raise CliError(f"cannot load construct: {exc}") from exc
     if args.linear:
         construct = construct.with_circular(False)
+    out = Path(args.output)
+    if out.suffix.lower() not in (".xlsx", ".csv"):
+        raise CliError("report file must end in .xlsx or .csv")
     region = _parse_region(args.region) if args.region else None
     try:
         check_region(region, len(construct.seq), construct.circular)
@@ -78,15 +92,12 @@ def _verify_clones(args: argparse.Namespace) -> int:
     params = VerifyParams(min_q=args.min_q, het_ratio=args.het_ratio)
     reports = verify_all(construct, region, grouping, params)
 
-    out = Path(args.output)
     if out.suffix.lower() == ".xlsx":
         clone_report_xlsx(out, reports, construct.name)
-    elif out.suffix.lower() == ".csv":
+    else:
         out.write_text(clones_csv(reports), encoding="utf-8")
         out.with_name(f"{out.stem}_differences.csv").write_text(
             differences_csv(reports), encoding="utf-8")
-    else:
-        raise CliError("report file must end in .xlsx or .csv")
 
     width = max(len(r.clone) for r in reports)
     for r in reports:
@@ -103,7 +114,7 @@ def _qc(args: argparse.Namespace) -> int:
     if args.output:
         Path(args.output).write_text(text, encoding="utf-8")
     else:
-        sys.stdout.write(text)
+        print(text, end="")
     return 0
 
 

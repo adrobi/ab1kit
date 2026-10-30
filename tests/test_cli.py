@@ -144,3 +144,52 @@ def test_cyrillic_paths_on_legacy_console(tmp_path: Path) -> None:
     assert b"Traceback" not in proc.stderr
     assert "Клон ж".encode() in proc.stdout  # utf-8 forced regardless of the console
     assert "Ё!.ab1".encode() in proc.stderr
+
+
+def test_attached_console_uses_console_code_page(monkeypatch) -> None:
+    import builtins
+    import ctypes
+    import types
+
+    kernel32 = types.SimpleNamespace(AttachConsole=lambda pid: 1, GetConsoleOutputCP=lambda: 866,
+                                     SetConsoleOutputCP=lambda cp: pytest.fail("must not change"))
+    monkeypatch.setattr(ctypes, "windll", types.SimpleNamespace(kernel32=kernel32), raising=False)
+    opened = []
+    monkeypatch.setattr(builtins, "open", lambda *a, **k: opened.append((a, k)) or object())
+    monkeypatch.setattr(sys, "stdout", None)
+    monkeypatch.setattr(sys, "stderr", None)
+    chrom_cli._attach_console()
+    assert [a[0] for a, _ in opened] == ["CONOUT$", "CONOUT$"]
+    assert all(k["encoding"] == "cp866" and k["errors"] == "replace" for _, k in opened)
+
+
+def test_qc_without_stdout(monkeypatch, reads_dir: Path) -> None:
+    monkeypatch.setattr(sys, "stdout", None)
+    assert chrom_cli.main(["qc", str(reads_dir)]) == 0  # nowhere to print, must not crash
+
+
+@pytest.mark.parametrize("text, expected", [("1-10", (0, 10)), ("600-50", (599, 50))])
+def test_parse_region(text, expected) -> None:
+    assert chrom_cli._parse_region(text) == expected
+
+
+@pytest.mark.parametrize("text", ["abc", "5", "0-10", "-3-4", "1-2-3", ""])
+def test_parse_region_rejects(text) -> None:
+    with pytest.raises(chrom_cli.CliError):
+        chrom_cli._parse_region(text)
+
+
+def test_wrap_region_circular_ok_linear_rejected(reads_dir: Path, tmp_path: Path) -> None:
+    base = ["verify-clones", "--construct", str(COI_GB), "--region", "600-50", str(reads_dir)]
+    assert chrom_cli.main(base + ["--linear", "-o", str(tmp_path / "a.csv")]) == 2
+    ref = tmp_path / "circ.fasta"
+    ref.write_text(">c\n" + coi_reference() + "\n")  # FASTA defaults to circular
+    base[2] = str(ref)
+    assert chrom_cli.main(base + ["-o", str(tmp_path / "b.csv")]) in (0, 1)
+
+
+def test_bad_output_extension_rejected_before_verifying(reads_dir: Path, tmp_path: Path, monkeypatch) -> None:
+    import chrom_core.clones as clones
+    monkeypatch.setattr(clones, "verify_all", lambda *a, **k: pytest.fail("ran verify_all"))
+    assert chrom_cli.main(["verify-clones", "--construct", str(COI_GB), str(reads_dir),
+                           "-o", str(tmp_path / "r.txt")]) == 2
