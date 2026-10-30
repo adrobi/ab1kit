@@ -135,7 +135,6 @@ class MainWindow(QMainWindow):
         task.finished.connect(on_done)
         return task
 
-
     # ------------------------------------------------------------------ menus
     def _build_menus(self) -> None:
         file_menu = self.menuBar().addMenu(tr("menu.file"))
@@ -227,7 +226,6 @@ class MainWindow(QMainWindow):
                 lambda _=False, p=path: Path(p).exists() and self.open_path(p)
             )
             self.recent_menu.addAction(action)
-
 
     # ------------------------------------------------- delegates to the read view
     def open_path(self, path: str | Path) -> bool:

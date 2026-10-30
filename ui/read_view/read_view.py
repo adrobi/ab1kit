@@ -85,6 +85,15 @@ class ReadView(QMainWindow):
         layout.addWidget(self.scrollbar)
         self.setCentralWidget(central)
 
+        self.undo_action = QAction(tr("menu.edit.undo"), self)
+        self.undo_action.setShortcut("Ctrl+Z")
+        self.undo_action.triggered.connect(self.undo_read)
+        self.undo_action.setEnabled(False)
+        self.redo_action = QAction(tr("menu.edit.redo"), self)
+        self.redo_action.setShortcut("Ctrl+Y")
+        self.redo_action.triggered.connect(self.redo_read)
+        self.redo_action.setEnabled(False)
+
         self._channel_boxes: dict[str, QCheckBox] = {}
         self._build_toolbar()
         self._build_docks()
@@ -177,7 +186,6 @@ class ReadView(QMainWindow):
         self.scrollbar.valueChanged.connect(
             lambda value: self.chrom_view.set_offset(float(value))
         )
-
 
     def open_path(self, path: str | Path) -> bool:
         try:
@@ -347,7 +355,6 @@ class ReadView(QMainWindow):
             key="blast",
         )
 
-
     def _verify_dialog(self) -> None:
         if not (self.read_model and self.alignment and self.reference_seq):
             self._say(tr("verify.need_reference"), 6000)
@@ -430,7 +437,6 @@ class ReadView(QMainWindow):
             QMessageBox.warning(self, tr("verify.save_xlsx"), str(exc))
             return
         self._say(tr("export.done", path=path), 5000)
-
 
     # ------------------------------------------------------------------ batch
     def open_folder_dialog(self) -> None:
@@ -728,7 +734,7 @@ class ReadView(QMainWindow):
         self.read_edited.emit(self._path)
 
     def autosave_session(self) -> None:
-        """Called by the shell on close: keep unsaved edits in the sidecar."""
+        """Called by the shell on close: save the sidecar if modified, else delete a stale one."""
         if self.read_model is not None and self._path is not None:
             sidecar = sessions.session_path(self._path)
             try:

@@ -36,15 +36,7 @@ def add_file_actions(view, file_menu: QMenu) -> None:
 
 
 def add_edit_actions(view, edit_menu: QMenu) -> None:
-    view.undo_action = QAction(tr("menu.edit.undo"), view)
-    view.undo_action.setShortcut("Ctrl+Z")
-    view.undo_action.triggered.connect(view.undo_read)
-    view.undo_action.setEnabled(False)
     edit_menu.addAction(view.undo_action)
-    view.redo_action = QAction(tr("menu.edit.redo"), view)
-    view.redo_action.setShortcut("Ctrl+Y")
-    view.redo_action.triggered.connect(view.redo_read)
-    view.redo_action.setEnabled(False)
     edit_menu.addAction(view.redo_action)
     edit_menu.addSeparator()
     find_action = QAction(tr("menu.edit.find"), view)

@@ -352,19 +352,41 @@ def test_reverse_read_reference_overlay_in_displayed_orientation(qapp):
 
 
 @pytest.mark.skipif(not AB1, reason="no example .ab1 files")
-def test_read_view_emits_read_edited_on_edit_and_undo(qapp):
+def test_read_view_emits_read_edited(qapp):
     from chrom_core.config import AppConfig
     from ui.main_window import MainWindow
 
     window = MainWindow(AppConfig(recent_files=[]))
     emitted = []
     window.read_view.read_edited.connect(emitted.append)
-    assert window.read_view.open_path(AB1[0])
+    view = window.read_view
+    assert view.open_path(AB1[0])
     assert emitted == []  # opening is not an edit
-    assert window.read_view.current_model() is window.read_model
+    assert view.current_model() is window.read_model
 
-    window.read_view.apply_base_change(0, "N")
-    assert emitted == [Path(AB1[0])]
-    window.read_view.undo_read()
-    assert emitted == [Path(AB1[0])] * 2
+    expected = [Path(AB1[0])]
+    steps = [
+        lambda: view.apply_base_change(0, "N"),
+        view.undo_read,
+        view.redo_read,
+        lambda: view.apply_trim_range(10, 100),
+        view.reverse_complement_read,
+        view._save_session,
+    ]
+    for count, step in enumerate(steps, start=1):
+        step()
+        assert emitted == expected * count
     window.close()
+    assert emitted == expected * len(steps)  # close-time autosave does not emit
+
+
+@pytest.mark.skipif(not AB1, reason="no example .ab1 files")
+def test_bare_read_view_works_without_shell_menus(qapp):
+    from chrom_core.config import AppConfig
+    from ui.read_view import ReadView
+
+    view = ReadView(AppConfig(recent_files=[]), lambda *a, **k: None)
+    assert view.open_path(AB1[0])
+    view.apply_base_change(0, "N")
+    assert view.undo_action.isEnabled()
+    view.close()

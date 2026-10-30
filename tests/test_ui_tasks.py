@@ -132,7 +132,6 @@ def test_main_window_blast_uses_task_and_cancel_drops_result(qapp, monkeypatch, 
     from ui.main_window import MainWindow
 
     monkeypatch.setattr("ui.main_window.save_config", lambda *a, **k: None)
-
     monkeypatch.setattr("ui.read_view.read_view.save_config", lambda *a, **k: None)
     opened = []
     monkeypatch.setattr(
@@ -198,7 +197,6 @@ def test_scan_last_start_wins(qapp, monkeypatch, tmp_path):
     from ui.main_window import MainWindow
 
     monkeypatch.setattr("ui.main_window.save_config", lambda *a, **k: None)
-
     monkeypatch.setattr("ui.read_view.read_view.save_config", lambda *a, **k: None)
     real = batch.scan_folder
 
@@ -229,7 +227,6 @@ def test_second_blast_cancels_first(qapp, monkeypatch):
     from ui.main_window import MainWindow
 
     monkeypatch.setattr("ui.main_window.save_config", lambda *a, **k: None)
-
     monkeypatch.setattr("ui.read_view.read_view.save_config", lambda *a, **k: None)
     opened = []
     monkeypatch.setattr(
