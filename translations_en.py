@@ -180,6 +180,8 @@ EN = {
     "matrix.legend.disputed": "disputed",
     "matrix.legend.low_quality": "low Q",
     "matrix.legend.mixed": "double peak",
+    "matrix.legend.unchecked": "not checked",
+    "matrix.legend.outside": "outside region",
     "matrix.empty": "No clones to show",
     "matrix.hint": "Wheel: zoom, drag: pan, Shift+drag on the reference: set the region",
 }

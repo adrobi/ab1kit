@@ -5,12 +5,15 @@ Colours
 -------
 - Coverage (per region position, reads with Q >= min_q): both strands -> theme
   ``cov_both`` (saturated), one strand -> ``cov_one`` (light), none -> the empty
-  ``track`` background. Positions outside the region carry no coverage.
-- Difference marks (in-region differences only) use the saturated variant of
-  the status palette (``STATUS_HEX`` dark tone) in both themes, so a thin mark
-  stays visible on light coverage: ``confirmed`` -> errors red, ``disputed`` ->
-  red/pale-red horizontal stripes, ``low_quality`` -> no-data grey; mixed
-  (double-peak) positions -> mixed purple.
+  ``track`` background. Outside the region the core computes no coverage, so
+  the track there is hatched as "not checked".
+- Difference marks use the saturated variant of the status palette
+  (``STATUS_HEX`` dark tone) in both themes, so a thin mark stays visible on
+  light coverage: ``confirmed`` -> solid errors red, ``disputed`` -> hollow
+  errors-red outline (at least 5 px wide), ``low_quality`` -> solid no-data
+  grey; mixed (double-peak) positions -> solid mixed purple. Differences
+  outside the region (they do not affect the verdict) keep their style but are
+  shorter and translucent.
 - Verdict chips use ``status_color`` of the current theme.
 
 The axis is linear 0..L also for circular constructs; anything crossing the
@@ -21,8 +24,8 @@ from __future__ import annotations
 
 import math
 
-from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QMouseEvent, QPainter, QPen, QWheelEvent
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, QSize, Qt, Signal
+from PySide6.QtGui import QBrush, QColor, QFont, QFontMetrics, QMouseEvent, QPainter, QPen, QWheelEvent
 from PySide6.QtWidgets import QWidget
 
 from chrom_core.clones import CloneReport, Region
@@ -39,6 +42,10 @@ ROW_H = 24
 TRACK_H = 10        # clone coverage bar
 REF_TRACK_H = 14    # reference / feature bar
 MARK_H = 16
+OUT_MARK_H = 10     # differences outside the region: shorter ...
+OUT_ALPHA = 180     # ... and translucent
+MARK_MIN_W = 3
+OUTLINE_MIN_W = 5   # hollow (disputed) marks need room for an inside
 LEGEND_H = 20
 CHIP_W = 84
 CHIP_H = 16
@@ -59,17 +66,23 @@ def segments(start: int, end: int, length: int) -> list[tuple[int, int]]:
     return [(start, length), (0, end)]
 
 
-def mark_colors(theme: str) -> dict[str, QColor]:
-    """Mark colour per difference status, plus ``mixed`` and the pale stripe of
-    ``disputed`` (``disputed_stripe``)."""
-    del theme  # same saturated tones in both themes (see module docstring)
+def mark_colors() -> dict[str, QColor]:
+    """Mark colour per difference status, plus ``mixed``. The same saturated
+    tones are used in both themes (see the module docstring)."""
     return {
         "confirmed": status.status_color("errors", "dark"),
         "disputed": status.status_color("errors", "dark"),
-        "disputed_stripe": status.status_color("errors", "light"),
         "low_quality": status.status_color("no_data", "dark"),
         "mixed": status.status_color("mixed", "dark"),
     }
+
+
+def outside(region: tuple[int, int] | None, length: int) -> list[tuple[int, int]]:
+    """Linear pieces of the construct outside ``region`` (none for ``None``)."""
+    if region is None:
+        return []
+    start, end = region
+    return [(a, b) for a, b in segments(end, start, length) if b > a]
 
 
 def _coverage_runs(report: CloneReport) -> list[tuple[int, int, int]]:
@@ -92,9 +105,10 @@ class _Row:
     def __init__(self, report: CloneReport) -> None:
         self.report = report
         self.runs = _coverage_runs(report)
-        self.differences = sorted(   # stronger statuses painted last, on top
-            report.region_differences,
-            key=lambda d: _STATUS_ORDER.index(d.status) if d.status in _STATUS_ORDER else 0)
+        self.differences = sorted(   # in-region and stronger statuses painted last, on top
+            report.differences,
+            key=lambda d: (d.in_region,
+                           _STATUS_ORDER.index(d.status) if d.status in _STATUS_ORDER else 0))
         self.mixed = report.mixed_positions
 
 
@@ -123,6 +137,7 @@ class CloneMatrix(QWidget):
         self._press_view = 0.0
         self._mode = ""            # "", "click", "pan", "region"
         self._band: tuple[float, float] | None = None
+        self._name_w = NAME_MIN
         self.setToolTip(tr("matrix.hint"))
         self.setMinimumWidth(320)
 
@@ -132,6 +147,7 @@ class CloneMatrix(QWidget):
         self._construct = construct
         self._region = region
         self._rows = [_Row(r) for r in reports]
+        self._update_name_width()
         self._view_start, self._view_span = 0.0, float(max(1, len(construct.seq)))
         self.updateGeometry()
         self.update()
@@ -158,6 +174,22 @@ class CloneMatrix(QWidget):
 
     def pos_at(self, x: float) -> float:
         return self._view_start + (x - self._track_left()) / self._track_width() * self._view_span
+
+    def ruler_ticks(self) -> list[tuple[int, float]]:
+        """``(label, x)`` of the ruler ticks: 1-based base numbers at base centres,
+        so they read like the summary's region text."""
+        fm = QFontMetrics(self._small_font())
+        label_w = fm.horizontalAdvance(f"{self._length():,}") + 16
+        raw = self._view_span * label_w / self._track_width()
+        magnitude = 10 ** math.floor(math.log10(max(raw, 1)))
+        step = next(m * magnitude for m in (1, 2, 5, 10) if m * magnitude >= raw)
+        end = self._view_start + self._view_span
+        v = max(step, math.ceil((self._view_start + 0.5) / step) * step)
+        ticks = []
+        while v - 0.5 <= end and v <= self._length():
+            ticks.append((int(v), self.x_for(v - 0.5)))
+            v += step
+        return ticks
 
     def reference_rect(self) -> QRect:
         return QRect(round(self._track_left()), MARGIN + RULER_H,
@@ -217,9 +249,19 @@ class CloneMatrix(QWidget):
         return len(self._construct.seq) if self._construct else 1
 
     def _name_width(self) -> int:
+        return self._name_w
+
+    def _update_name_width(self) -> None:
+        """Measure the clone names once (on new data or a font/style change)."""
         fm = QFontMetrics(self._bold_font())
         widest = max((fm.horizontalAdvance(r.report.clone) for r in self._rows), default=0)
-        return min(NAME_MAX, max(NAME_MIN, widest + GAP))
+        self._name_w = min(NAME_MAX, max(NAME_MIN, widest + GAP))
+
+    def changeEvent(self, event: QEvent) -> None:  # noqa: N802
+        if event.type() in (QEvent.Type.FontChange, QEvent.Type.StyleChange):
+            self._update_name_width()
+            self.update()
+        super().changeEvent(event)
 
     def _track_left(self) -> float:
         return float(MARGIN + self._name_width())
@@ -377,23 +419,15 @@ class CloneMatrix(QWidget):
 
     def _paint_ruler(self, painter: QPainter, colors: dict) -> None:
         painter.setFont(self._small_font())
-        fm = painter.fontMetrics()
-        label_w = fm.horizontalAdvance(f"{self._length():,}") + 16
-        raw = self._view_span * label_w / self._track_width()
-        magnitude = 10 ** math.floor(math.log10(max(raw, 1)))
-        step = next(m * magnitude for m in (1, 2, 5, 10) if m * magnitude >= raw)
+        label_w = painter.fontMetrics().horizontalAdvance(f"{self._length():,}") + 16
         y = MARGIN + RULER_H
         painter.setPen(QPen(QColor(colors["dim"]), 1))
         painter.save()
         painter.setClipRect(self._track_clip().adjusted(-label_w, 0, label_w, 0))
-        first = max(step, math.ceil(self._view_start / step) * step)
-        v = first
-        while v <= self._view_start + self._view_span:
-            x = self.x_for(v)
+        for v, x in self.ruler_ticks():
             painter.drawLine(QPointF(x, y - 4), QPointF(x, y))
             painter.drawText(QRectF(x - label_w / 2, MARGIN - 2, label_w, RULER_H - 3),
-                             Qt.AlignmentFlag.AlignCenter, f"{int(v):,}".replace(",", " "))
-            v += step
+                             Qt.AlignmentFlag.AlignCenter, f"{v:,}".replace(",", "\u202f"))
         painter.restore()
         painter.drawLine(QPointF(self._track_left(), y), QPointF(self._track_right(), y))
 
@@ -457,28 +491,50 @@ class CloneMatrix(QWidget):
         painter.save()
         painter.setClipRect(self._track_clip())
         self._fill_axis(painter, track, 0, self._length(), QColor(colors["track"]))
+        self._paint_unchecked(painter, colors, track)
         shades = {2: QColor(colors["cov_both"]), 1: QColor(colors["cov_one"])}
-        for start, end, level in row.runs:
-            self._fill_axis(painter, track, start, end, shades[level])
-        marks = mark_colors(self._theme)
-        width = max(3.0, self._px_per_base())
+        first, last = self._view_start, self._view_start + self._view_span
+        for start, end, level in row.runs:   # runs are linear (never wrap)
+            if end <= first or start >= last:
+                continue
+            x0 = self.x_for(start)
+            painter.fillRect(QRectF(x0, track.top(), self.x_for(end) - x0, track.height()),
+                             shades[level])
+        marks = mark_colors()
         for pos in row.mixed:
-            self._paint_mark(painter, self._mark_x(pos, "substitution"), cy, width, marks["mixed"])
+            self._paint_mark(painter, self._mark_x(pos, "substitution"), cy, marks["mixed"])
         for d in row.differences:
-            x = self._mark_x(d.ref_pos, d.kind)
-            if d.status == "disputed":
-                self._paint_mark(painter, x, cy, width, marks["disputed_stripe"])
-                for k in range(0, MARK_H, 4):
-                    painter.fillRect(QRectF(x - width / 2, cy - MARK_H / 2 + k, width, 2),
-                                     marks["disputed"])
-            else:
-                self._paint_mark(painter, x, cy, width, marks.get(d.status, marks["low_quality"]))
+            if not first - 1 <= d.ref_pos <= last:
+                continue
+            colour = QColor(marks.get(d.status, marks["low_quality"]))
+            if not d.in_region:
+                colour.setAlpha(OUT_ALPHA)
+            self._paint_mark(painter, self._mark_x(d.ref_pos, d.kind), cy, colour,
+                             hollow=d.status == "disputed",
+                             height=MARK_H if d.in_region else OUT_MARK_H)
         painter.restore()
         self._paint_chip(painter, report)
 
-    @staticmethod
-    def _paint_mark(painter: QPainter, x: float, cy: float, width: float, colour: QColor) -> None:
-        painter.fillRect(QRectF(x - width / 2, cy - MARK_H / 2, width, MARK_H), colour)
+    def _paint_unchecked(self, painter: QPainter, colors: dict, track: QRectF) -> None:
+        """Hatch the track outside the region: not checked, not "no coverage"."""
+        hatch = QColor(colors["dim"])
+        hatch.setAlpha(140)
+        for a, b in outside(self._region, self._length()):
+            x0 = self.x_for(a)
+            painter.fillRect(QRectF(x0, track.top(), self.x_for(b) - x0, track.height()),
+                             QBrush(hatch, Qt.BrushStyle.BDiagPattern))
+
+    def _paint_mark(self, painter: QPainter, x: float, cy: float, colour: QColor,
+                    hollow: bool = False, height: int = MARK_H) -> None:
+        """A whole-pixel mark centred on ``x``; ``hollow`` draws a 1 px outline."""
+        width = max(OUTLINE_MIN_W if hollow else MARK_MIN_W, round(self._px_per_base()))
+        left, top = round(x - width / 2), round(cy - height / 2)
+        if not hollow:
+            painter.fillRect(QRect(left, top, width, height), colour)
+            return
+        for rect in (QRect(left, top, width, 1), QRect(left, top + height - 1, width, 1),
+                     QRect(left, top, 1, height), QRect(left + width - 1, top, 1, height)):
+            painter.fillRect(rect, colour)
 
     def _chip_text(self, report: CloneReport) -> str:
         if report.verdict == "errors":
@@ -517,31 +573,43 @@ class CloneMatrix(QWidget):
 
     def _paint_legend(self, painter: QPainter, colors: dict, n_rows: int) -> None:
         top = self._rows_top() + n_rows * ROW_H + GAP
-        marks = mark_colors(self._theme)
+        marks = mark_colors()
+        dim_red = QColor(marks["confirmed"])
+        dim_red.setAlpha(OUT_ALPHA)
         items = [
             ("block", QColor(colors["cov_both"]), "matrix.legend.cov_both"),
             ("block", QColor(colors["cov_one"]), "matrix.legend.cov_one"),
             ("block", QColor(colors["track"]), "matrix.legend.cov_none"),
+            ("hatch", QColor(colors["track"]), "matrix.legend.unchecked"),
             ("mark", marks["confirmed"], "matrix.legend.confirmed"),
-            ("stripe", marks["disputed"], "matrix.legend.disputed"),
+            ("hollow", marks["disputed"], "matrix.legend.disputed"),
             ("mark", marks["low_quality"], "matrix.legend.low_quality"),
             ("mark", marks["mixed"], "matrix.legend.mixed"),
+            ("short", dim_red, "matrix.legend.outside"),
         ]
         painter.setFont(self._small_font())
         fm = painter.fontMetrics()
+        hatch = QColor(colors["dim"])
+        hatch.setAlpha(140)
         x, cy = float(self._track_left()), top + LEGEND_H / 2
         for kind, colour, key in items:
-            if kind == "block":
+            if kind in ("block", "hatch"):
                 painter.fillRect(QRectF(x, cy - 4, 14, 8), colour)
+                if kind == "hatch":
+                    painter.fillRect(QRectF(x, cy - 4, 14, 8),
+                                     QBrush(hatch, Qt.BrushStyle.BDiagPattern))
                 x += 18
             else:
-                if kind == "stripe":
-                    painter.fillRect(QRectF(x, cy - 6, 4, 12), marks["disputed_stripe"])
-                    for k in range(0, 12, 4):
-                        painter.fillRect(QRectF(x, cy - 6 + k, 4, 2), colour)
+                rect = QRect(round(x), round(cy) - 6, 5 if kind == "hollow" else 4, 12)
+                if kind == "short":
+                    rect = QRect(rect.left(), round(cy) - 4, 4, 8)
+                if kind == "hollow":
+                    painter.setPen(colour)
+                    painter.setBrush(Qt.BrushStyle.NoBrush)
+                    painter.drawRect(rect.adjusted(0, 0, -1, -1))
                 else:
-                    painter.fillRect(QRectF(x, cy - 6, 4, 12), colour)
-                x += 8
+                    painter.fillRect(rect, colour)
+                x += 9
             text = tr(key)
             painter.setPen(QColor(colors["dim"]))
             painter.drawText(QPointF(x, cy + fm.ascent() / 2 - 1), text)

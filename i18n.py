@@ -187,6 +187,8 @@ RU = {
     "matrix.legend.disputed": "спорно",
     "matrix.legend.low_quality": "низкое Q",
     "matrix.legend.mixed": "двойной пик",
+    "matrix.legend.unchecked": "не проверяется",
+    "matrix.legend.outside": "вне региона",
     "matrix.empty": "Нет клонов для показа",
     "matrix.hint": "Колёсико — масштаб, перетаскивание — сдвиг, Shift+протяжка по референсу — задать регион",
 }

@@ -28,6 +28,7 @@ F = DATA / "real" / F_NAME
 R = DATA / "real" / R_NAME
 REGION = (6, 647)
 P = 250          # substitution site inside the region
+OUTSIDE = 652    # covered by F only, outside the region
 MIXED_AT = (200, 300, 400)
 
 
@@ -53,10 +54,15 @@ def reports(construct, tmp_path_factory):
     folder = tmp_path_factory.mktemp("clones")
     i = _f_index(construct, P)
     # a C peak 4x the called base, then the call edited to C: the trace agrees
-    # with the edit (no artificial double peak at P)
-    assert real_read(F_NAME).seq[i] != "C"
-    edited = EditableRead(with_secondary_peak(real_read(F_NAME), i, "C", 4.0))
-    edited.set_base(i, "C")
+    # with the edit (no artificial double peak); same at OUTSIDE
+    chrom = real_read(F_NAME)
+    o = _f_index(construct, OUTSIDE)
+    edits = {i: "C" if chrom.seq[i] != "C" else "G", o: "C" if chrom.seq[o] != "C" else "G"}
+    for index, base in edits.items():
+        chrom = with_secondary_peak(chrom, index, base, 4.0)
+    edited = EditableRead(chrom)
+    for index, base in edits.items():
+        edited.set_base(index, base)
     sub_dir = folder / "sub"
     sub_dir.mkdir()
     f_sub = write_read(edited.current(), sub_dir, F_NAME)
@@ -86,6 +92,7 @@ def reports(construct, tmp_path_factory):
     assert [r.verdict for r in out] == ["ok", "errors", "errors", "incomplete", "mixed"]
     assert [d.status for d in out[1].region_differences] == ["confirmed"]
     assert [d.status for d in out[2].region_differences] == ["disputed"]
+    assert [d.ref_pos for d in out[1].differences if not d.in_region] == [OUTSIDE]
     return out
 
 
@@ -246,14 +253,131 @@ def test_renders_in_both_themes(qapp, construct, reports, theme):
     from ui.status import status_color
 
     m = _matrix(qapp, construct, reports, theme=theme)
-    image = QImage(m.size(), QImage.Format.Format_ARGB32)
-    image.fill(QColor("#123456"))
-    m.render(image)
+    image = _render(m, QColor("#123456"))
     assert image.pixelColor(2, 2) != QColor("#123456")   # background painted
     point = m.mark_point("c2", P)
-    assert image.pixelColor(point) == mark_colors(theme)["confirmed"]
+    assert image.pixelColor(point) == mark_colors()["confirmed"]
     chip = m.chip_rect("c1")   # sample the pill's padding, left of the text
     assert image.pixelColor(chip.left() + 8, chip.center().y()) == status_color("ok", theme)
+
+
+def _render(m, fill=QColor("#123456")) -> QImage:
+    image = QImage(m.size(), QImage.Format.Format_ARGB32)
+    image.fill(fill)
+    m.render(image)
+    return image
+
+
+def test_disputed_mark_is_hollow(qapp, construct, reports):
+    from ui.construct.matrix import mark_colors
+
+    m = _matrix(qapp, construct, reports)
+    image = _render(m)
+    red = mark_colors()["disputed"]
+    centre = m.mark_point("c3", P)
+    assert image.pixelColor(centre) != red                       # hollow inside
+    edges = [image.pixelColor(centre + QPoint(dx, 0)) for dx in range(-4, 5)]
+    assert edges.count(red) == 2                                 # left and right outline
+    assert sum(1 for dx in range(-4, 5) if image.pixelColor(centre + QPoint(dx, 0)) != red
+               and abs(dx) <= 1) == 3                            # >= 5 px wide outline
+    assert image.pixelColor(m.mark_point("c2", P)) == mark_colors()["confirmed"]   # solid
+
+
+def test_out_of_region_difference_drawn_and_clickable(qapp, construct, reports):
+    from ui.theme import theme as palette
+
+    m = _matrix(qapp, construct, reports)
+    image = _render(m)
+    point = m.mark_point("c2", OUTSIDE)
+    colour = image.pixelColor(point)
+    assert colour.red() > colour.green() + 40 and colour.red() > colour.blue() + 40
+    assert m.hit_test(point) == ("c2", OUTSIDE)
+    clicked = []
+    m.difference_clicked.connect(lambda c, p: clicked.append((c, p)))
+    left, none = Qt.MouseButton.LeftButton, Qt.MouseButton.NoButton
+    _send_mouse(m, QEvent.Type.MouseButtonPress, point, left, left)
+    _send_mouse(m, QEvent.Type.MouseButtonRelease, point, left, none)
+    assert clicked == [("c2", OUTSIDE)]
+    # outside the region the track is hatched ("not checked"); a gap in the
+    # region's coverage stays the plain track colour ("no coverage")
+    track = QColor(palette("light")["track"])
+    y = m.row_rect("c1").center().y()
+    hatched = [image.pixelColor(x, y + dy) for dx in range(10)
+               for x in [round(m.x_for(647)) + 2 + dx] for dy in range(-4, 5)
+               if x < round(m.x_for(len(construct.seq)))]
+    assert hatched and any(c != track for c in hatched)
+    y4 = m.row_rect("c4").center().y()
+    assert all(image.pixelColor(x, y4) == track
+               for x in range(round(m.x_for(450)), round(m.x_for(470))))
+
+
+def test_hit_test_while_zoomed(qapp, construct, reports):
+    m = _matrix(qapp, construct, reports)
+    anchor = QPointF(m.x_for(P + 0.5), m.row_rect("c2").center().y())
+    zoom = QWheelEvent(anchor, m.mapToGlobal(anchor), QPoint(), QPoint(0, 120 * 12),
+                       Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier,
+                       Qt.ScrollPhase.NoScrollPhase, False)
+    QApplication.sendEvent(m, zoom)
+    assert m.view_range()[1] < 100
+    point = m.mark_point("c2", P)
+    assert m.hit_test(point) == ("c2", P)
+    neighbour = QPoint(round(m.x_for(P + 3.5)), point.y())     # three bases away
+    assert m.hit_test(neighbour) is None
+    assert m.hit_test(QPoint(point.x(), m.row_rect("c1").center().y())) is None
+
+
+def test_ruler_labels_are_one_based(qapp, construct, reports):
+    m = _matrix(qapp, construct, reports)
+    ticks = m.ruler_ticks()
+    assert ticks and all(v % ticks[0][0] == 0 for v, _ in ticks)
+    for v, x in ticks:
+        assert int(m.pos_at(x)) + 1 == v   # the tick sits on base number v (1-based)
+
+
+def test_mark_at_last_position(qapp, construct):
+    from ui.construct.matrix import CloneMatrix, mark_colors
+
+    last = len(construct.seq) - 1
+    rep = _synthetic("end", "errors", len(construct.seq))
+    rep = CloneReport(rep.clone, (), rep.coverage, (
+        CloneDifference(last, "substitution", "A", "G", 2, 0, 0, "confirmed", True),), (), "errors")
+    m = CloneMatrix()
+    m.set_data(construct, None, [rep])
+    m.resize(900, m.sizeHint().height())
+    point = m.mark_point("end", last)
+    assert point.x() < m.chip_rect("end").left()
+    assert m.hit_test(point) == ("end", last)
+    assert _render(m).pixelColor(point) == mark_colors()["confirmed"]
+
+
+# measured ~12 ms (best of 5) on the dev machine for 12 rows x 200 runs on 10 kb;
+# the bound is about 2x that (it was ~440 ms before name widths were cached)
+PAINT_BUDGET_S = 0.025
+
+
+def test_paint_cost_10kb_12_rows(qapp):
+    import time
+
+    from chrom_core.reference import Construct
+    from ui.construct.matrix import CloneMatrix
+
+    length = 10_000
+    big = Construct("big", "ACGT" * (length // 4), False, ())
+    coverage = {p: ((1, 1) if (p // 50) % 2 else (1, 0)) for p in range(length)}   # 200 runs
+    reps = [CloneReport(f"clone_{i}", (), coverage, (), (), "ok") for i in range(12)]
+    m = CloneMatrix()
+    m.set_data(big, None, reps)
+    m.resize(1200, m.sizeHint().height())
+    image = QImage(m.size(), QImage.Format.Format_ARGB32)
+    m.render(image)   # warm-up
+    best = min(_timed(m, image, time) for _ in range(3))
+    assert best < PAINT_BUDGET_S, f"paint took {best * 1000:.0f} ms"
+
+
+def _timed(m, image, time) -> float:
+    start = time.perf_counter()
+    m.render(image)
+    return time.perf_counter() - start
 
 
 def test_wrapping_region_draws_two_segments():
