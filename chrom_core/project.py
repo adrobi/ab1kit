@@ -99,5 +99,5 @@ def load_project(path: Path) -> Project:
             grouping=grouping,
             params=VerifyParams(**data["params"]),
         )
-    except (KeyError, TypeError, ValueError, IndexError) as e:
+    except (KeyError, TypeError, ValueError, IndexError, AttributeError) as e:
         raise ValueError(f"Project file is incomplete or damaged: {path} ({e!r})") from e

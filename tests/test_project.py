@@ -107,3 +107,14 @@ def test_missing_fields(tmp_path):
     f.write_text(json.dumps({"app": "ab1kit", "version": 1}), encoding="utf-8")
     with pytest.raises(ValueError):
         load_project(f)
+
+
+@pytest.mark.parametrize("grouping", [None, [], ["x"], {"reads": [None]}])
+def test_malformed_grouping_is_a_value_error(tmp_path, grouping):
+    f = tmp_path / "s.ab1proj"
+    save_project(f, _make(tmp_path))
+    data = json.loads(f.read_text(encoding="utf-8"))
+    data["grouping"] = grouping
+    f.write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(ValueError, match="s.ab1proj"):
+        load_project(f)
