@@ -114,6 +114,8 @@ class DetailPane(QWidget):
         splitter.addWidget(self.table)
         splitter.setStretchFactor(0, 3)
         splitter.setStretchFactor(1, 2)
+        self._splitter = splitter
+        self._split_set = False    # first real width: chromatograms 3/5, table 2/5
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(splitter)
@@ -248,6 +250,9 @@ class DetailPane(QWidget):
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
+        if not self._split_set and self.isVisible() and self.width() > 100:
+            self._split_set = True
+            self._splitter.setSizes([self.width() * 3 // 5, self.width() * 2 // 5])
         self._reset_default_zoom()
         if self._zoom_chosen:
             self._apply_view()

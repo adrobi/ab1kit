@@ -1,5 +1,7 @@
-"""ab1kit shell window: File/View/Help menus, language, theme, recent files,
-background-task status bar. The single-read viewer lives in ``ui.read_view``."""
+"""ab1kit shell window: tabs "construct check" / "read viewer", File/Project/
+View/Help menus, language, theme, recent files, background-task status bar.
+The single-read viewer lives in ``ui.read_view``, the construct check in
+``ui.construct.workspace``."""
 
 from __future__ import annotations
 
@@ -10,15 +12,18 @@ from pathlib import Path
 from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
     QApplication,
+    QFileDialog,
     QMainWindow,
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QTabWidget,
 )
 
 from chrom_core.config import AppConfig, load_config, save_config
 from i18n import set_language, tr
 from ui import status
+from ui.construct.workspace import PROJECT_SUFFIX, ConstructWorkspace
 from ui.read_view import ReadView
 from ui.status import bind_icon
 from ui.tasks import Task, run_task
@@ -63,10 +68,19 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("ab1kit")
         self.resize(1200, 780)
         self.read_view = ReadView(self.config, self._start_task)
-        self.setCentralWidget(self.read_view)
+        self.workspace = ConstructWorkspace(self.config, self._start_task)
+        self.tabs = QTabWidget()
+        self.tabs.setDocumentMode(True)
+        self.tabs.addTab(self.workspace, tr("tab.construct"))
+        self.tabs.addTab(self.read_view, tr("tab.read"))
+        self.setCentralWidget(self.tabs)
         self.read_view.file_opened.connect(self._push_recent)
+        self.read_view.file_opened.connect(lambda _p: self.tabs.setCurrentWidget(self.read_view))
         self.read_view.status_message.connect(self.statusBar().showMessage)
         self.read_view.title_changed.connect(self.setWindowTitle)
+        self.read_view.read_edited.connect(self._read_edited)
+        self.workspace.status_message.connect(self.statusBar().showMessage)
+        self.workspace.open_read.connect(self._open_read)
 
         self._build_menus()
         self.setAcceptDrops(True)
@@ -144,11 +158,12 @@ class MainWindow(QMainWindow):
         open_action = QAction(tr("menu.file.open"), self)
         bind_icon(open_action, "folder-open")
         open_action.setShortcut("Ctrl+O")
-        open_action.triggered.connect(self.read_view.open_dialog)
+        open_action.triggered.connect(lambda: self._in_read_tab(self.read_view.open_dialog))
         file_menu.addAction(open_action)
         open_folder = QAction(tr("menu.file.open_folder"), self)
         open_folder.setShortcut("Ctrl+Shift+O")
-        open_folder.triggered.connect(self.read_view.open_folder_dialog)
+        open_folder.triggered.connect(
+            lambda: self._in_read_tab(self.read_view.open_folder_dialog))
         file_menu.addAction(open_folder)
         self.recent_menu = file_menu.addMenu(tr("menu.file.recent"))
         self.read_view.add_file_actions(file_menu)
@@ -158,6 +173,7 @@ class MainWindow(QMainWindow):
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
 
+        self._build_project_menu(self.menuBar().addMenu(tr("menu.project")))
         self.read_view.add_edit_menu(self.menuBar().addMenu(tr("menu.edit")))
 
         view_menu = self.menuBar().addMenu(tr("menu.view"))
@@ -189,6 +205,81 @@ class MainWindow(QMainWindow):
         )
         help_menu.addAction(about_action)
 
+    def _build_project_menu(self, menu) -> None:
+        self.project_menu = menu
+        for key, shortcut, slot in (
+            ("menu.project.new", "", self._project_new),
+            ("menu.project.open", "Ctrl+Shift+P", self._project_open),
+            ("menu.project.save", "Ctrl+Shift+S", self._project_save),
+            ("menu.project.save_as", "", self._project_save_as),
+            (None, "", None),
+            ("menu.project.export", "Ctrl+Shift+E", self._project_export),
+        ):
+            if key is None:
+                menu.addSeparator()
+                continue
+            action = QAction(tr(key), self)
+            if shortcut:
+                action.setShortcut(shortcut)
+            action.triggered.connect(slot)
+            menu.addAction(action)
+
+    # --------------------------------------------------------------- projects
+    def _show_workspace(self) -> None:
+        self.tabs.setCurrentWidget(self.workspace)
+
+    def _project_new(self) -> None:
+        self.workspace.clear()
+        self._show_workspace()
+
+    def _project_open(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, tr("menu.project.open"), "", f"ab1kit project (*{PROJECT_SUFFIX})")
+        if path:
+            self.open_path(path)
+
+    def _project_save(self) -> None:
+        path = self.workspace.project_path()
+        if path is None:
+            self._project_save_as()
+        elif self.workspace.save_project(path):
+            self._push_recent(str(path))
+
+    def _project_save_as(self) -> None:
+        self._show_workspace()
+        path, _ = QFileDialog.getSaveFileName(
+            self, tr("menu.project.save_as"), "", f"ab1kit project (*{PROJECT_SUFFIX})")
+        if not path:
+            return
+        if not path.lower().endswith(PROJECT_SUFFIX):
+            path += PROJECT_SUFFIX
+        if self.workspace.save_project(path):
+            self._push_recent(path)
+
+    def _project_export(self) -> None:
+        self._show_workspace()
+        path, chosen = QFileDialog.getSaveFileName(
+            self, tr("menu.project.export"), "", "Excel (*.xlsx);;CSV (*.csv)")
+        if not path:
+            return
+        if Path(path).suffix.lower() not in (".xlsx", ".csv"):
+            path += ".csv" if "csv" in chosen.lower() else ".xlsx"
+        self.workspace.export_report(path)
+
+    def _in_read_tab(self, action) -> None:
+        self.tabs.setCurrentWidget(self.read_view)
+        action()
+
+    def _open_read(self, path: Path) -> None:
+        self.read_view.open_path(path)   # file_opened switches to the viewer tab
+
+    def _read_edited(self, path: Path) -> None:
+        """Edits reach the check through the read's session sidecar: write it
+        now (or drop it after undoing everything), then re-run the check."""
+        if self.workspace.contains_read(path):
+            self.read_view.autosave_session()
+            self.workspace.read_edited(path)
+
     def _switch_language(self, code: str) -> None:
         self.config.language = code
         save_config(self.config)
@@ -200,13 +291,14 @@ class MainWindow(QMainWindow):
         self.config.theme = name
         status.set_theme(name)
         self.read_view.apply_theme(name)
+        self.workspace.set_theme(name)
         QApplication.instance().setStyleSheet(app_qss(name == "dark"))
         save_config(self.config)
 
     # ----------------------------------------------------------- recent, drops
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # noqa: N802
         urls = event.mimeData().urls()
-        if urls and urls[0].toLocalFile().lower().endswith(".ab1"):
+        if urls and urls[0].toLocalFile().lower().endswith((".ab1", PROJECT_SUFFIX)):
             event.acceptProposedAction()
 
     def dropEvent(self, event: QDropEvent) -> None:  # noqa: N802
@@ -234,7 +326,14 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------- delegates to the read view
     def open_path(self, path: str | Path) -> bool:
-        return self.read_view.open_path(path)
+        """A ``.ab1proj`` opens in the construct check, anything else in the viewer."""
+        if str(path).lower().endswith(PROJECT_SUFFIX):
+            self._show_workspace()
+            opened = self.workspace.load_project(path)
+            if opened:
+                self._push_recent(str(path))
+            return opened
+        return self.read_view.open_path(path)   # file_opened switches to the viewer tab
 
     def refresh_read(self) -> None:
         self.read_view.refresh_read()
@@ -285,7 +384,7 @@ class MainWindow(QMainWindow):
         self.read_view._save_verify_csv()
 
     def _scan_folder(self, folder: Path) -> None:
-        self.read_view._scan_folder(folder)
+        self._in_read_tab(lambda: self.read_view._scan_folder(folder))
 
     def _batch_export(self) -> None:
         self.batch_dock.export_trimmed()

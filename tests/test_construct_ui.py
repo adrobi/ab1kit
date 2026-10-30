@@ -631,3 +631,301 @@ def test_pane_survives_corrupt_ab1(qapp, construct, pane_report, tmp_path):
     assert any("corrupt.ab1" in lab.text() for lab in pane.findChildren(QLabel))
     pane.show_position(P)
     assert pane.views()[0].highlights
+
+
+# ------------------------------------------------------------------ workspace (Task 16)
+
+REAL_DIR = DATA / "real"
+
+
+@pytest.fixture
+def window(qapp, monkeypatch):
+    """Main window with config writes disabled and message boxes recorded."""
+    from PySide6.QtWidgets import QMessageBox
+
+    from chrom_core.config import AppConfig
+    from ui.main_window import MainWindow
+
+    for target in ("ui.main_window.save_config", "ui.read_view.read_view.save_config",
+                   "ui.construct.workspace.save_config"):
+        monkeypatch.setattr(target, lambda *a, **k: None)
+    messages: list[str] = []
+
+    def record(_parent, title, text, *a, **k):
+        messages.append(f"{title}: {text}")
+        return QMessageBox.StandardButton.Ok
+
+    monkeypatch.setattr(QMessageBox, "warning", record)
+    monkeypatch.setattr(QMessageBox, "critical", record)
+    w = MainWindow(AppConfig(recent_files=[]))
+    w.messages = messages
+    yield w
+    w._cancel_tasks()
+    w.close()
+
+
+def _wait_idle(qapp, ws, timeout=30.0):
+    import time
+
+    deadline = time.monotonic() + timeout
+    while ws.is_verifying() and time.monotonic() < deadline:
+        qapp.processEvents()
+        time.sleep(0.005)
+    qapp.processEvents()
+    assert not ws.is_verifying()
+
+
+def _drop(widget, paths):
+    from PySide6.QtCore import QMimeData, QUrl
+    from PySide6.QtGui import QDropEvent
+
+    mime = QMimeData()
+    mime.setUrls([QUrl.fromLocalFile(str(p)) for p in paths])
+    event = QDropEvent(QPointF(10, 10), Qt.DropAction.CopyAction, mime,
+                       Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+    widget.dropEvent(event)
+
+
+def _count_starts(ws):
+    calls = []
+    original = ws._start_task
+
+    def counting(*a, **k):
+        calls.append(k.get("key"))
+        return original(*a, **k)
+
+    ws._start_task = counting
+    return calls
+
+
+def _loaded(qapp, window, construct_path=COI_GB, reads=(REAL_DIR,)):
+    ws = window.workspace
+    _drop(ws, [construct_path, *reads])
+    _wait_idle(qapp, ws)
+    return ws
+
+
+def test_workspace_is_first_tab_and_shows_empty_state(window):
+    ws = window.workspace
+    assert window.tabs.indexOf(ws) == 0
+    assert window.tabs.currentWidget() is ws
+    assert window.tabs.indexOf(window.read_view) == 1
+    window.show()
+    assert ws.empty_state.isVisible()
+    assert not ws.matrix.isVisible()
+    texts = " ".join(z.text() for z in ws.empty_state.zones())
+    assert "FASTA" in texts and ".ab1" in texts
+
+
+def test_drop_construct_and_reads_folder(qapp, window, construct):
+    ws = _loaded(qapp, window)
+    window.show()
+    assert not ws.empty_state.isVisible() and ws.matrix.isVisible()
+    expected = verify_all(construct, None, ws.grouping())
+    assert ws.matrix.visible_clones() == [r.clone for r in expected]
+    assert len(ws.matrix.visible_clones()) == 4
+    assert [r.verdict for r in ws.reports()] == [r.verdict for r in expected]
+    # same-lineage clones against the unmodified reference: no errors
+    same = [r for r in ws.reports() if r.clone.startswith(("Achl_ACHLO006", "Achl_ACHLO007"))]
+    assert len(same) == 2 and all(r.verdict in ("ok", "incomplete") for r in same)
+    assert ws.summary.title_text() == construct.name
+    assert window.messages == []
+
+
+def test_matrix_click_shows_details_and_open_read_switches_tab(qapp, window, tmp_path, construct):
+    seq = construct.seq
+    mutant = "G" if seq[P] != "G" else "T"
+    fasta = tmp_path / "mut.fa"
+    fasta.write_text(f">mut\n{seq[:P]}{mutant}{seq[P + 1:]}\n")
+    f_copy = tmp_path / F_NAME
+    f_copy.write_bytes(F.read_bytes())
+    ws = _loaded(qapp, window, fasta, [f_copy])
+    ws.set_region((100, 600))
+    _wait_idle(qapp, ws)
+    (report,) = ws.reports()
+    assert report.verdict == "errors" and [d.ref_pos for d in report.region_differences] == [P]
+
+    ws.matrix.difference_clicked.emit(report.clone, P)
+    assert len(ws.detail.views()) == 1
+
+    ws.detail.open_read.emit(f_copy)
+    assert window.tabs.currentWidget() is window.read_view
+    assert window.read_model is not None
+
+    # edit the read at the difference: the check re-runs and the verdict changes
+    window.apply_base_change(_f_index(construct, P), mutant)
+    assert ws.is_verifying()
+    _wait_idle(qapp, ws)
+    assert [r.verdict for r in ws.reports()] == ["ok"]
+
+    window.undo_read()
+    _wait_idle(qapp, ws)
+    assert [r.verdict for r in ws.reports()] == ["errors"]
+
+
+def test_read_edit_outside_project_does_not_reverify(qapp, window):
+    ws = _loaded(qapp, window)
+    starts = _count_starts(ws)
+    examples = Path(__file__).resolve().parents[1] / "examples"
+    window.read_view.read_edited.emit(examples / "310.ab1")
+    assert starts == []
+
+
+def test_project_roundtrip_restores_region_grouping_params(qapp, window, tmp_path):
+    ws = _loaded(qapp, window)
+    clone = ws.grouping().reads[0]
+    grouping = ws.grouping()
+    grouping.assign(clone.path, "renamed", clone.primer)
+    ws.set_grouping(grouping)
+    ws.set_region((100, 600))
+    ws.controls.min_q.setValue(25)
+    _wait_idle(qapp, ws)
+    project = tmp_path / "check.ab1proj"
+    assert ws.save_project(project)
+
+    ws.clear()
+    assert ws.reports() == [] and ws.region() is None
+    assert ws.load_project(project)
+    _wait_idle(qapp, ws)
+    assert ws.region() == (100, 600)
+    assert (ws.controls.start_spin.value(), ws.controls.end_spin.value()) == (101, 600)
+    assert ws.grouping().to_dict() == grouping.to_dict()
+    assert ws.params().min_q == 25 and ws.controls.min_q.value() == 25
+    assert "renamed" in ws.matrix.visible_clones()
+    assert window.messages == []
+
+
+def test_broken_project_shows_message_and_empty_workspace(qapp, window, tmp_path):
+    ws = _loaded(qapp, window)
+    bad = tmp_path / "bad.ab1proj"
+    bad.write_text("{not json", encoding="utf-8")
+    assert ws.load_project(bad) is False
+    assert len(window.messages) == 1 and "bad.ab1proj" in window.messages[0]
+    window.show()
+    assert ws.empty_state.isVisible()
+    assert ws.reports() == [] and ws.grouping().reads == []
+
+
+def test_invalid_region_shows_message_and_does_not_run(qapp, window):
+    ws = _loaded(qapp, window)       # COI .gb is linear
+    starts = _count_starts(ws)
+    assert ws.set_region((500, 100)) is False
+    assert starts == [] and ws.region() is None
+    assert len(window.messages) == 1
+    assert (ws.controls.start_spin.value(), ws.controls.end_spin.value()) == (1, 658)
+    # the same through the spin boxes (1-based, inclusive): 500..658 is fine ...
+    ws.controls.start_spin.setValue(500)
+    assert starts == ["verify"] and ws.region() == (499, 658)
+    # ... 500..100 wraps the origin of a linear construct: refused, spins restored
+    ws.controls.end_spin.setValue(100)
+    assert starts == ["verify"] and ws.region() == (499, 658) and len(window.messages) == 2
+    assert (ws.controls.start_spin.value(), ws.controls.end_spin.value()) == (500, 658)
+    _wait_idle(qapp, ws)
+
+
+def test_region_spins_and_matrix_drag_stay_in_sync(qapp, window):
+    ws = _loaded(qapp, window)
+    starts = _count_starts(ws)
+    ws.matrix.region_changed.emit((50, 400))
+    assert ws.region() == (50, 400) and starts == ["verify"]
+    assert (ws.controls.start_spin.value(), ws.controls.end_spin.value()) == (51, 400)
+    ws.controls.whole_button.click()
+    assert ws.region() is None and starts == ["verify", "verify"]
+    _wait_idle(qapp, ws)
+
+
+def test_cancelled_reverification_keeps_previous_verdicts(qapp, window):
+    ws = _loaded(qapp, window)
+    before = ws.reports()
+    shown = ws.matrix.visible_clones()
+    info = ws.summary.info_text()
+    ws.set_region((100, 600))
+    assert ws.is_verifying()
+    window._cancel_tasks()
+    _wait_idle(qapp, ws)
+    assert ws.reports() is before
+    assert ws.matrix.visible_clones() == shown and ws.summary.info_text() == info
+
+
+def test_failed_reverification_keeps_previous_verdicts(qapp, window, monkeypatch):
+    ws = _loaded(qapp, window)
+    before = ws.reports()
+
+    def boom(*a, **k):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("ui.construct.workspace.verify_all", boom)
+    ws.controls.min_q.setValue(30)
+    _wait_idle(qapp, ws)
+    assert ws.reports() is before
+    assert any("boom" in m for m in window.messages)
+
+
+def test_params_and_circular_trigger_reverification(qapp, window):
+    ws = _loaded(qapp, window)
+    starts = _count_starts(ws)
+    ws.controls.het_ratio.setValue(0.5)
+    ws.controls.mixed_min.setValue(4)
+    ws.controls.circular.setChecked(True)
+    assert starts == ["verify"] * 3
+    _wait_idle(qapp, ws)
+    assert ws.params().het_ratio == 0.5 and ws.params().mixed_min_positions == 4
+    assert ws.construct().circular is True
+
+
+def test_export_report_csv_and_xlsx(qapp, window, tmp_path):
+    ws = _loaded(qapp, window)
+    assert ws.export_report(tmp_path / "report.csv")
+    assert (tmp_path / "report.csv").read_text(encoding="utf-8").startswith("clone,verdict")
+    assert (tmp_path / "report_differences.csv").read_text(encoding="utf-8").startswith("clone,")
+    assert ws.export_report(tmp_path / "report.xlsx")
+    assert (tmp_path / "report.xlsx").stat().st_size > 0
+
+
+def test_grouping_dialog_pattern_preview_and_invalid_regex(qapp):
+    from PySide6.QtWidgets import QDialogButtonBox
+
+    from chrom_core.clones import group_reads
+    from ui.construct.grouping_dialog import GroupingDialog
+
+    grouping = group_reads(sorted(REAL_DIR.glob("*.ab1")))
+    dialog = GroupingDialog(grouping, "", None)
+    ok = dialog.buttons.button(QDialogButtonBox.StandardButton.Ok)
+    assert dialog.table.rowCount() == 8 and ok.isEnabled()
+
+    dialog.pattern_edit.setText("([")
+    assert not ok.isEnabled() and dialog.pattern_invalid()
+    dialog.pattern_edit.setText("(.*)")              # no named groups
+    assert not ok.isEnabled() and dialog.pattern_invalid()
+
+    pattern = r"Achl_ACHLO00(?P<clone>\d-09)_\d_(?P<primer>[FR])"
+    dialog.pattern_edit.setText(pattern)
+    assert ok.isEnabled() and not dialog.pattern_invalid()
+    result = dialog.result_grouping()
+    assert sorted(result.clones()) == ["6-09", "7-09"]
+    assert len(result.unassigned) == 4
+    empty_rows = [r for r in range(8) if dialog.table.item(r, 1).text() == ""]
+    assert dialog.unassigned_rows() == empty_rows and len(empty_rows) == 4
+    assert dialog.result_pattern() == pattern
+
+    # manual edit: clear a clone cell -> that read becomes unassigned
+    first = next(r for r in range(8) if dialog.table.item(r, 1).text())
+    dialog.table.item(first, 1).setText("")
+    assert first in dialog.unassigned_rows()
+    assert len(dialog.result_grouping().unassigned) == 5
+
+
+def test_new_ui_keys_exist_in_both_languages():
+    import re as _re
+
+    import i18n
+
+    root = Path(__file__).resolve().parents[1]
+    files = [root / "ui" / "main_window.py", *sorted((root / "ui" / "construct").glob("*.py"))]
+    keys = set()
+    for path in files:
+        text = path.read_text(encoding="utf-8")
+        keys |= set(_re.findall(r"""\btr\(\s*["']([a-z_.]+)["']""", text))
+    assert {"tab.construct", "menu.project.open", "workspace.drop_construct"} <= keys
+    assert not (keys - set(i18n.RU)), keys - set(i18n.RU)
+    assert not (keys - set(i18n.EN)), keys - set(i18n.EN)

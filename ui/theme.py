@@ -69,22 +69,32 @@ def _read_qss(dark: bool) -> str:
     return (resource_dir() / name).read_text(encoding="utf-8")
 
 
-def tick_image(background: str) -> str:
-    """Path of a tick (Lucide ``check``) PNG-free SVG readable on ``background``,
-    for QSS ``image: url(...)``. Written once per colour to the temp folder."""
-    r, g, b = (int(background.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4))
-    tick = "#1a1a1a" if 0.299 * r + 0.587 * g + 0.114 * b > 150 else "#ffffff"
+def tinted_icon(name: str, color: str, stroke: str = "2") -> str:
+    """Path of icon ``name`` (``ui/icons/<name>.svg``) drawn in ``color``, for QSS
+    ``image: url(...)``. Written once per icon and colour to the temp folder."""
     folder = Path(tempfile.gettempdir()) / "ab1kit_icons"
     folder.mkdir(exist_ok=True)
-    target = folder / f"check_{tick.lstrip('#')}.svg"
+    target = folder / f"{name}_{color.lstrip('#')}_{stroke}.svg"
     if not target.exists():
-        svg = (resource_dir() / "icons" / "check.svg").read_text(encoding="utf-8")
-        target.write_text(svg.replace("currentColor", tick).replace('stroke-width="2"', 'stroke-width="3"'),
+        svg = (resource_dir() / "icons" / f"{name}.svg").read_text(encoding="utf-8")
+        target.write_text(svg.replace("currentColor", color)
+                          .replace('stroke-width="2"', f'stroke-width="{stroke}"'),
                           encoding="utf-8")
     return target.as_posix()
+
+
+def tick_image(background: str) -> str:
+    """Path of a tick (Lucide ``check``) SVG readable on ``background``."""
+    r, g, b = (int(background.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4))
+    tick = "#1a1a1a" if 0.299 * r + 0.587 * g + 0.114 * b > 150 else "#ffffff"
+    return tinted_icon("check", tick, "3")
 
 
 def app_qss(dark: bool) -> str:
     """Application stylesheet (ui/style.qss or ui/style_dark.qss). Both themes set
     explicit colours so the chrome never depends on the OS light/dark mode."""
-    return _read_qss(dark).replace("@TICK@", tick_image("#2f6fed"))
+    arrow = theme("dark" if dark else "light")["text"]
+    return (_read_qss(dark)
+            .replace("@TICK@", tick_image("#2f6fed"))
+            .replace("@UP@", tinted_icon("chevron-up", arrow, "3"))
+            .replace("@DOWN@", tinted_icon("chevron-down", arrow, "3")))

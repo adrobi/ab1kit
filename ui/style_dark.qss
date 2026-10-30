@@ -30,6 +30,15 @@ QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QPlainTextEdit, QTextEdit {
     background-color: #1e1e1e; border: 1px solid #3f3f46; border-radius: 4px; padding: 3px 6px;
     selection-background-color: #2f6fed; selection-color: #ffffff; }
 QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus { border-color: #2f6fed; }
+QSpinBox, QDoubleSpinBox { padding-right: 18px; }
+QSpinBox::up-button, QDoubleSpinBox::up-button { subcontrol-origin: border; subcontrol-position: top right;
+    width: 16px; border: none; border-left: 1px solid #3f3f46; border-top-right-radius: 4px; }
+QSpinBox::down-button, QDoubleSpinBox::down-button { subcontrol-origin: border; subcontrol-position: bottom right;
+    width: 16px; border: none; border-left: 1px solid #3f3f46; border-bottom-right-radius: 4px; }
+QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover,
+QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover { background-color: #3a3d41; }
+QSpinBox::up-arrow, QDoubleSpinBox::up-arrow { image: url(@UP@); width: 9px; height: 9px; }
+QSpinBox::down-arrow, QDoubleSpinBox::down-arrow { image: url(@DOWN@); width: 9px; height: 9px; }
 
 QDockWidget { titlebar-close-icon: none; }
 QDockWidget::title { background-color: #2d2d30; border-bottom: 1px solid #3f3f46; padding: 5px 8px; font-weight: 600; }

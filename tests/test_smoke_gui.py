@@ -549,3 +549,88 @@ def test_tooltips_only_on_long_cells(qapp):
     set_full_text_tooltip(short)
     set_full_text_tooltip(long_)
     assert short.toolTip() == "" and long_.toolTip() == "x" * 60
+
+
+# ------------------------------------------------------------------ Task 16: tabs, projects
+def _coi_project(tmp_path, region):
+    from chrom_core.clones import Grouping, VerifyParams
+    from chrom_core.project import Project, save_project
+
+    refs = Path(__file__).resolve().parent / "data" / "refs"
+    project = tmp_path / "p.ab1proj"
+    save_project(project, Project(refs / "coi_HM417896.gb", False, region, Grouping(),
+                                  VerifyParams()))
+    return project
+
+
+def test_construct_tab_first_with_project_menu(qapp):
+    from chrom_core.config import AppConfig
+    from i18n import tr
+    from ui.main_window import MainWindow
+
+    window = MainWindow(AppConfig(recent_files=[]))
+    assert window.tabs.count() == 2
+    assert window.tabs.currentIndex() == 0 and window.tabs.currentWidget() is window.workspace
+    assert window.tabs.tabText(0) == tr("tab.construct")
+    assert window.tabs.tabText(1) == tr("tab.read")
+    titles = [a.text() for a in window.project_menu.actions() if not a.isSeparator()]
+    assert titles == [tr("menu.project.new"), tr("menu.project.open"), tr("menu.project.save"),
+                      tr("menu.project.save_as"), tr("menu.project.export")]
+    window.close()
+
+
+@pytest.mark.skipif(not AB1, reason="no example .ab1 files")
+def test_open_ab1_switches_to_read_tab(qapp):
+    from chrom_core.config import AppConfig
+    from ui.main_window import MainWindow
+
+    window = MainWindow(AppConfig(recent_files=[]))
+    assert window.open_path(AB1[0])
+    assert window.tabs.currentWidget() is window.read_view
+    window.close()
+
+
+def test_open_project_path_goes_to_construct_tab(qapp, tmp_path):
+    from chrom_core.config import AppConfig
+    from ui.main_window import MainWindow
+
+    project = _coi_project(tmp_path, (10, 200))
+    window = MainWindow(AppConfig(recent_files=[]))
+    window.tabs.setCurrentWidget(window.read_view)
+    assert window.open_path(project)
+    assert window.tabs.currentWidget() is window.workspace
+    assert window.workspace.region() == (10, 200)
+    assert window.workspace.construct().name == "HM417896.1"
+    window.close()
+
+
+def test_run_opens_project_argument(qapp, monkeypatch, tmp_path):
+    from PySide6.QtWidgets import QApplication
+
+    import ui.main_window as mw
+
+    project = _coi_project(tmp_path, None)
+    opened = []
+    class ExistingApp:  # run() must not create a second QApplication or block
+        instance = staticmethod(QApplication.instance)
+
+        def __init__(self, _args):
+            pass
+
+        def setStyle(self, _name):  # noqa: N802
+            pass
+
+        def exec(self):
+            return 0
+
+    monkeypatch.setattr(mw, "QApplication", ExistingApp)
+    from PySide6.QtWidgets import QMessageBox
+
+    for box in ("critical", "warning"):
+        monkeypatch.setattr(QMessageBox, box, lambda *a, **k: QMessageBox.StandardButton.Ok)
+    monkeypatch.setattr(mw.MainWindow, "show", lambda self: opened.append(self))
+    assert mw.run([str(project)]) == 0
+    (window,) = opened
+    assert window.tabs.currentWidget() is window.workspace
+    assert window.workspace.construct() is not None
+    window.close()

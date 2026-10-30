@@ -224,7 +224,8 @@ class CloneReport:
         return tuple(d for d in self.differences if d.in_region)
 
 
-def _check_region(region: Region | None, length: int, circular: bool) -> Region:
+def check_region(region: Region | None, length: int, circular: bool) -> Region:
+    """``region`` normalised (``None`` -> whole construct); ``ValueError`` if invalid."""
     if region is None:
         return (0, length)
     start, end = region
@@ -239,7 +240,7 @@ def _check_region(region: Region | None, length: int, circular: bool) -> Region:
 
 def region_positions(region: Region | None, length: int) -> list[int]:
     """Construct positions of ``region`` in order (``None``: the whole construct)."""
-    start, end = _check_region(region, length, circular=True)
+    start, end = check_region(region, length, circular=True)
     if start < end:
         return list(range(start, end))
     return list(range(start, length)) + list(range(end))
@@ -386,7 +387,7 @@ def verify_clone(
     (default: ``difference_effect``; ``None`` leaves it empty).
     """
     L = len(construct.seq)
-    positions = region_positions(_check_region(region, L, construct.circular), L)
+    positions = region_positions(check_region(region, L, construct.circular), L)
     in_region = set(positions)
     ref = construct.seq.upper()
 
@@ -471,7 +472,7 @@ def verify_all(
     polled before each one and, when true, raises
     ``concurrent.futures.CancelledError``.
     """
-    _check_region(region, len(construct.seq), construct.circular)
+    check_region(region, len(construct.seq), construct.circular)
     groups = grouping.clones()
     reports = []
     for done, reads in enumerate(groups.values(), start=1):

@@ -5,6 +5,7 @@ chromatograms (`.ab1` files) — a free, offline alternative to FinchTV / Chroma
 for everyday molecular biology lab work. English/Russian interface.
 
 ![viewer](docs/screenshots/viewer.png)
+![construct check](docs/screenshots/construct.png)
 
 ## Features
 
