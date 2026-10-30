@@ -16,21 +16,41 @@ class CliError(Exception):
     """Bad input: reported on stderr, exit code 2."""
 
 
+def _console_encoding(code_page: int) -> str:
+    """Python codec for a console code page; utf-8 when unknown (0 = query failed)."""
+    import codecs
+
+    if code_page:
+        try:
+            codecs.lookup(f"cp{code_page}")
+            return f"cp{code_page}"
+        except LookupError:
+            pass
+    return "utf-8"
+
+
 def _attach_console() -> None:
     """Frozen windowed build: reuse the parent console, writing in its own code page."""
+    opened = []
     try:
         import ctypes
 
         kernel32 = ctypes.windll.kernel32
         if not kernel32.AttachConsole(-1):
             return
-        encoding = f"cp{kernel32.GetConsoleOutputCP()}"  # never change the user's code page
-        if sys.stdout is None:
-            sys.stdout = open("CONOUT$", "w", encoding=encoding, errors="replace")
-        if sys.stderr is None:
-            sys.stderr = open("CONOUT$", "w", encoding=encoding, errors="replace")
-    except (AttributeError, OSError):
-        pass
+        encoding = _console_encoding(kernel32.GetConsoleOutputCP())  # never change it
+        wanted = [name for name in ("stdout", "stderr") if getattr(sys, name) is None]
+        for name in wanted:
+            opened.append((name, open("CONOUT$", "w", encoding=encoding, errors="replace")))
+    except (AttributeError, OSError, LookupError):
+        for _name, stream in opened:  # all or nothing: keep both streams consistent
+            try:
+                stream.close()
+            except (AttributeError, OSError):
+                pass
+        return
+    for name, stream in opened:
+        setattr(sys, name, stream)
 
 
 def _prepare_streams() -> None:

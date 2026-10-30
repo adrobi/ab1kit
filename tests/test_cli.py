@@ -193,3 +193,43 @@ def test_bad_output_extension_rejected_before_verifying(reads_dir: Path, tmp_pat
     monkeypatch.setattr(clones, "verify_all", lambda *a, **k: pytest.fail("ran verify_all"))
     assert chrom_cli.main(["verify-clones", "--construct", str(COI_GB), str(reads_dir),
                            "-o", str(tmp_path / "r.txt")]) == 2
+
+
+@pytest.mark.parametrize("code_page", [0, 99999])
+def test_attached_console_unknown_code_page_falls_back_to_utf8(monkeypatch, code_page) -> None:
+    import builtins
+    import ctypes
+    import types
+
+    kernel32 = types.SimpleNamespace(AttachConsole=lambda pid: 1,
+                                     GetConsoleOutputCP=lambda: code_page)
+    monkeypatch.setattr(ctypes, "windll", types.SimpleNamespace(kernel32=kernel32), raising=False)
+    opened = []
+    monkeypatch.setattr(builtins, "open", lambda *a, **k: opened.append(k) or object())
+    monkeypatch.setattr(sys, "stdout", None)
+    monkeypatch.setattr(sys, "stderr", None)
+    chrom_cli._attach_console()
+    assert len(opened) == 2
+    assert all(k["encoding"] == "utf-8" and k["errors"] == "replace" for k in opened)
+
+
+def test_attached_console_is_all_or_nothing(monkeypatch) -> None:
+    import builtins
+    import ctypes
+    import types
+
+    kernel32 = types.SimpleNamespace(AttachConsole=lambda pid: 1, GetConsoleOutputCP=lambda: 866)
+    monkeypatch.setattr(ctypes, "windll", types.SimpleNamespace(kernel32=kernel32), raising=False)
+    calls = []
+
+    def fake_open(*a, **k):
+        calls.append(a)
+        if len(calls) == 2:
+            raise OSError("no console")
+        return types.SimpleNamespace(close=lambda: None)
+
+    monkeypatch.setattr(builtins, "open", fake_open)
+    monkeypatch.setattr(sys, "stdout", None)
+    monkeypatch.setattr(sys, "stderr", None)
+    chrom_cli._attach_console()
+    assert sys.stdout is None and sys.stderr is None
