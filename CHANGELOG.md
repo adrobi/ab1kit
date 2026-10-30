@@ -17,7 +17,8 @@ from the command line.
   per-clone coverage by strand, merged differences and verdicts
   (`ok` / `errors` / `incomplete` / `mixed` / `no_data`)
 - Amino-acid consequences of differences inside CDS features
-- Clone report as CSV and Excel (sheets `Clones` and `Differences`);
+- Clone report as CSV and Excel (sheets `Clones` and `Differences`; unusable
+  reads listed per clone in `read_issues` and on the CLI's stderr);
   `.ab1proj` project files for verification sessions
 - Clone-verification workspace: summary bar, clone matrix, difference detail pane with stacked
   chromatograms, grouping editor, drag-and-drop of reads and projects

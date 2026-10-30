@@ -1,5 +1,6 @@
 name: Release
 
+# workflow_dispatch builds and uploads the artifacts; a release is created only for v* tags.
 on:
   push:
     tags: ["v*"]
