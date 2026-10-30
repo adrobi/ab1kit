@@ -39,7 +39,9 @@ def displayed_index(alignment: ReadAlignment, ref_pos: int, read_length: int) ->
 
     ``ref_to_read`` indexes the aligned orientation (the reverse complement on
     '-'), so the displayed index is ``n-1-idx`` there. A position deleted in the
-    read falls back to the nearest mapped neighbour; ``None`` when not covered.
+    read falls back to the nearest mapped neighbour; ``None`` when not covered,
+    including an index outside ``0..read_length-1`` (the read was edited after
+    the alignment was stored).
     """
     if not alignment.covers(ref_pos):
         return None
@@ -56,7 +58,8 @@ def displayed_index(alignment: ReadAlignment, ref_pos: int, read_length: int) ->
             break
     if idx is None:
         return None
-    return idx if alignment.strand == "+" else read_length - 1 - idx
+    idx = idx if alignment.strand == "+" else read_length - 1 - idx
+    return idx if 0 <= idx < read_length else None
 
 
 class DetailPane(QWidget):

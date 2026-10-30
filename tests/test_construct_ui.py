@@ -459,6 +459,33 @@ def test_displayed_index_converts_once_for_both_strands():
     assert displayed_index(gap, 6, 10) == 4
 
 
+def test_displayed_index_out_of_range_is_not_covered():
+    from chrom_core.align import ReadAlignment
+    from ui.construct.detail_pane import displayed_index
+
+    def al(strand):
+        return ReadAlignment(strand=strand, score=0, ref_start=0, ref_end=10, read_start=0,
+                             read_end=10, ref_to_read={5: 8}, differences=[], identity=1.0,
+                             alternatives=1, oriented_read="", blocks=[], ref_length=100)
+
+    # the chromatogram was shortened by an edit after the alignment was stored
+    assert displayed_index(al("+"), 5, 6) is None      # index 8 >= 6
+    assert displayed_index(al("-"), 5, 6) is None      # 6 - 1 - 8 < 0
+
+
+def test_pane_survives_alignment_past_a_shortened_read(qapp, construct, pane_report):
+    from dataclasses import replace
+
+    first = pane_report.reads[0]
+    far = {p: i + 100_000 for p, i in first.alignment.ref_to_read.items()}
+    stale = replace(pane_report, reads=(
+        replace(first, alignment=replace(first.alignment, ref_to_read=far)),
+        *pane_report.reads[1:]))
+    pane = _pane(qapp, construct, stale)
+    pane.show_position(P)
+    assert not pane._notes[0].isHidden() and pane._notes[1].isHidden()
+
+
 def test_pane_one_chromatogram_per_aligned_read(qapp, construct, pane_report):
     pane = _pane(qapp, construct, pane_report)
     assert len(pane.views()) == 2
