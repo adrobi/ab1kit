@@ -5,6 +5,9 @@ Usage: python scripts/make_icon.py [--out DIR]
 The SVG is the source of truth (letters are vector paths, so no fonts are
 needed). The ICO holds PNG-compressed entries, assembled here without extra
 dependencies.
+
+Note: the SVG letter outlines were extracted once from Consolas Bold 22px and are
+baked in as paths; this script does not touch them.
 """
 
 from __future__ import annotations

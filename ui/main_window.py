@@ -65,6 +65,8 @@ class MainWindow(QMainWindow):
         self.config = config or load_config()
         set_language(self.config.language)
 
+        # App-wide and idempotent; here (not only in run()) so directly constructed
+        # windows, e.g. in tests, carry the icon too.
         QApplication.instance().setWindowIcon(app_icon())
         self.setWindowTitle("ab1kit")
         self.resize(1200, 780)
