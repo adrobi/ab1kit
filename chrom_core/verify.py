@@ -17,12 +17,13 @@ expected variant gets a verdict:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from chrom_core.abif import Chromatogram
 from chrom_core.align import ReadAlignment
 from chrom_core.seqops import IUPAC
-from chrom_core.snps import DEFAULT_HET_RATIO, DEFAULT_MIN_Q, alleles_to_iupac, peak_heights
+from chrom_core.peaks import secondary_peak
+from chrom_core.snps import DEFAULT_HET_RATIO, DEFAULT_MIN_Q, alleles_to_iupac
 
 
 @dataclass(frozen=True)
@@ -41,7 +42,12 @@ class VariantVerdict:
     quality: int | None = None
     ratio: float | None = None
     read_pos: int | None = None  # 0-based index in the displayed read
-    note: str = ""
+    note: str = ""            # English text for CSV/XLSX reports
+    note_code: str = ""       # key for the localised UI text: verify.note.<code>
+    note_args: dict = field(default_factory=dict)
+
+
+_COMPLEMENT = {"A": "T", "C": "G", "G": "C", "T": "A"}
 
 
 # ------------------------------------------------------------------- parsing
@@ -150,43 +156,50 @@ def _verify_one(
         and (len(variant.ref) == 1 or variant.ref in (".", "", "-"))
     )
     if not is_snv:
-        return VariantVerdict(variant, "unsupported", "", note="only SNV rows are supported")
+        return VariantVerdict(
+            variant, "unsupported", "", note="only SNV rows are supported", note_code="only_snv"
+        )
     if not 0 <= pos < len(reference):
-        return VariantVerdict(variant, "unsupported", "", note="position outside the reference")
+        return VariantVerdict(
+            variant, "unsupported", "", note="position outside the reference",
+            note_code="pos_outside_ref",
+        )
 
     if variant.ref not in (".", "", "-") and variant.ref.upper() != reference[pos]:
         return VariantVerdict(
-            variant, "ref_mismatch", reference[pos], note="table ref base differs from the reference"
+            variant, "ref_mismatch", reference[pos],
+            note="table ref base differs from the reference", note_code="ref_differs",
         )
 
     if pos not in alignment.ref_to_read:
-        note = (
-            "deleted in the read"
-            if alignment.ref_start <= pos < alignment.ref_end
-            else "outside read coverage"
-        )
-        return VariantVerdict(variant, "no_data", "", note=note)
+        if alignment.ref_start <= pos < alignment.ref_end:
+            note, code = "deleted in the read", "deleted_in_read"
+        else:
+            note, code = "outside read coverage", "outside_coverage"
+        return VariantVerdict(variant, "no_data", "", note=note, note_code=code)
 
-    read_idx = alignment.ref_to_read[pos]
+    # ref_to_read indexes the read in its aligned orientation; map it back to
+    # the displayed read (chrom) for '-' strand.
+    n = len(chrom.seq)
+    reverse = alignment.strand == "-"
+    read_idx = n - 1 - alignment.ref_to_read[pos] if reverse else alignment.ref_to_read[pos]
     quality = chrom.quality[read_idx]
-    heights = peak_heights(chrom, read_idx)
     called = chrom.seq[read_idx].upper()
     called_alleles = set(IUPAC.get(called, "ACGT"))
-    primary = max((heights.get(b, 0) for b in called_alleles), default=0) or max(
-        heights.values(), default=0
-    )
-    outside = [(b, h) for b, h in heights.items() if b not in called_alleles]
-    secondary_base, secondary = max(outside, key=lambda kv: kv[1]) if outside else ("", 0)
-    ratio = secondary / primary if primary > 0 else None
+    peak = secondary_peak(chrom, read_idx)
+    secondary_base, ratio = peak.base, peak.ratio
 
     alleles = set(called_alleles)
     if ratio is not None and ratio >= het_ratio and secondary_base:
         alleles.add(secondary_base)
+    if reverse:  # express the observation on the reference strand
+        alleles = {_COMPLEMENT[a] for a in alleles}
     observed = alleles_to_iupac(alleles)
 
     if quality < min_q:
         return VariantVerdict(
-            variant, "low_quality", observed, quality, ratio, read_idx, f"Q{quality} < {min_q}"
+            variant, "low_quality", observed, quality, ratio, read_idx, f"Q{quality} < {min_q}",
+            "low_q", {"q": quality, "min_q": min_q},
         )
 
     alt_alleles = set(IUPAC.get(variant.alt, variant.alt))
@@ -225,6 +238,7 @@ def verdicts_xlsx(path, verdicts: list[VariantVerdict], sample_id: str = "") -> 
     """Excel report via openpyxl (imported lazily; optional dependency)."""
     try:
         from openpyxl import Workbook
+        from openpyxl.styles import Font
     except ImportError as exc:  # pragma: no cover - depends on environment
         raise RuntimeError("openpyxl is required for Excel reports: pip install openpyxl") from exc
 
@@ -234,7 +248,7 @@ def verdicts_xlsx(path, verdicts: list[VariantVerdict], sample_id: str = "") -> 
     header = ("sample",) + _CSV_HEADER
     sheet.append(header)
     for cell in sheet[1]:
-        cell.font = cell.font.copy(bold=True)
+        cell.font = Font(bold=True)
     for v in verdicts:
         ratio = round(v.ratio, 2) if v.ratio is not None else None
         sheet.append(

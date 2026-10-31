@@ -1,0 +1,279 @@
+"""Command-line subcommands: verify-clones, qc, export (thin shell over the core)."""
+
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+from Bio import SeqIO
+from openpyxl import load_workbook
+
+import chrom_cli
+from clone_fixtures import COI_GB, DATA, coi_reference, mutate
+
+ROOT = Path(__file__).resolve().parent.parent
+READS = ["Achl_ACHLO006-09_1_F.ab1", "Achl_ACHLO006-09_2_R.ab1",
+         "Achl_ACHLO007-09_1_F.ab1", "Achl_ACHLO007-09_2_R.ab1"]
+
+
+@pytest.fixture
+def reads_dir(tmp_path: Path) -> Path:
+    d = tmp_path / "Данные клоны"
+    d.mkdir()
+    for name in READS:
+        shutil.copy(DATA / "real" / name, d / name)
+    return d
+
+
+def test_verify_clones_xlsx(reads_dir: Path, tmp_path: Path, capsys) -> None:
+    out = tmp_path / "отчёт.xlsx"
+    code = chrom_cli.main(["verify-clones", "--construct", str(COI_GB), str(reads_dir),
+                           "-o", str(out)])
+    assert code == 0
+    book = load_workbook(out)
+    assert book.sheetnames == ["Clones", "Differences"]
+    shown = capsys.readouterr().out
+    assert "Achl_ACHLO006-09" in shown and "ok" in shown
+
+
+def test_verify_clones_csv_region_and_errors(reads_dir: Path, tmp_path: Path, capsys) -> None:
+    ref = tmp_path / "mutated.fasta"
+    seq = coi_reference()
+    ref.write_text(">mut\n" + mutate(seq, 250, "sub", "A" if seq[250] != "A" else "C") + "\n")
+    out = tmp_path / "rep.csv"
+    code = chrom_cli.main(["verify-clones", "--construct", str(ref), "--region", "7-647",
+                           "--linear", "--min-q", "20", "--het-ratio", "0.4",
+                           str(reads_dir), "-o", str(out)])
+    assert code == 1  # every clone carries the planted difference
+    assert "errors" in out.read_text(encoding="utf-8")
+    diffs = tmp_path / "rep_differences.csv"
+    assert diffs.exists() and "251" in diffs.read_text(encoding="utf-8")
+    assert "errors" in capsys.readouterr().out
+
+
+def test_verify_clones_input_errors(reads_dir: Path, tmp_path: Path, capsys) -> None:
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    out = tmp_path / "x.xlsx"
+    base = ["verify-clones", "-o", str(out)]
+    assert chrom_cli.main(base + ["--construct", str(COI_GB), str(empty)]) == 2
+    bad = tmp_path / "bad.gb"
+    bad.write_text("not a sequence file")
+    assert chrom_cli.main(base + ["--construct", str(bad), str(reads_dir)]) == 2
+    assert chrom_cli.main(base + ["--construct", str(COI_GB), "--region", "9-3",
+                                  "--linear", str(reads_dir)]) == 2
+    assert chrom_cli.main(base + ["--construct", str(COI_GB), "--region", "abc",
+                                  str(reads_dir)]) == 2
+    assert chrom_cli.main(base + ["--construct", str(COI_GB), "--pattern", "(",
+                                  str(reads_dir)]) == 2
+    assert chrom_cli.main(base + ["--construct", str(COI_GB),
+                                  str(tmp_path / "missing")]) == 2
+    assert capsys.readouterr().err.count("ab1kit:") >= 6
+    assert not out.exists()
+
+
+def test_unassigned_files_reported_on_stderr(reads_dir: Path, tmp_path: Path, capsys) -> None:
+    shutil.copy(DATA / "real" / READS[0], reads_dir / "!.ab1")
+    out = tmp_path / "r.csv"
+    chrom_cli.main(["verify-clones", "--construct", str(COI_GB), str(reads_dir), "-o", str(out)])
+    assert "!.ab1" in capsys.readouterr().err
+
+
+def test_qc_stdout_and_file(reads_dir: Path, tmp_path: Path, capsys) -> None:
+    assert chrom_cli.main(["qc", str(reads_dir)]) == 0
+    printed = capsys.readouterr().out
+    assert printed.startswith("file;length;mean_q") and READS[0] in printed
+    out = tmp_path / "qc.csv"
+    assert chrom_cli.main(["qc", str(reads_dir), "-o", str(out)]) == 0
+    assert READS[1] in out.read_text(encoding="utf-8")
+
+
+def test_export(reads_dir: Path, tmp_path: Path) -> None:
+    out = tmp_path / "вывод"
+    assert chrom_cli.main(["export", str(reads_dir), "--trim", "--fasta", "-o", str(out)]) == 0
+    files = sorted(p.name for p in out.glob("*.trimmed.fasta"))
+    assert len(files) == len(READS)
+    out2 = tmp_path / "fq"
+    assert chrom_cli.main(["export", str(reads_dir), "--trim", "-o", str(out2)]) == 0
+    assert len(list(out2.glob("*.trimmed.fastq"))) == len(READS)
+
+
+@pytest.mark.parametrize("argv", [[], ["x.ab1"]])
+def test_gui_path_unchanged(monkeypatch, argv) -> None:
+    import ui.main_window as mw
+    seen = []
+    monkeypatch.setattr(mw, "run", lambda a: seen.append(a) or 0)
+    assert chrom_cli.main(argv) == 0
+    assert seen == [argv]
+
+
+def _run_cli(*args, **kw):
+    return subprocess.run([sys.executable, "-m", "chrom_cli", *map(str, args)],
+                          capture_output=True, cwd=ROOT, **kw)
+
+
+def test_cli_does_not_import_qt_and_survives_legacy_console(reads_dir: Path, tmp_path: Path) -> None:
+    out = tmp_path / "r.csv"
+    code = (
+        "import sys, chrom_cli\n"
+        f"rc = chrom_cli.main(['verify-clones','--construct',r'{COI_GB}',r'{reads_dir}','-o',r'{out}'])\n"
+        "assert not any(m == 'PySide6' or m.startswith('PySide6.') for m in sys.modules), 'Qt imported'\n"
+        "sys.exit(rc)\n"
+    )
+    env = {**__import__("os").environ, "PYTHONIOENCODING": "cp1251"}
+    env.pop("PYTHONUTF8", None)
+    proc = subprocess.run([sys.executable, "-c", code], capture_output=True, cwd=ROOT, env=env)
+    assert proc.returncode == 0, proc.stderr.decode("utf-8", "replace")
+
+
+def test_cyrillic_paths_on_legacy_console(tmp_path: Path) -> None:
+    d = tmp_path / "Данные клоны"
+    d.mkdir()
+    for name in READS[:2]:
+        shutil.copy(DATA / "real" / name, d / name)
+    shutil.copy(DATA / "real" / READS[0], d / "Клон ж_1_F.ab1")
+    shutil.copy(DATA / "real" / READS[0], d / "Ё!.ab1")
+    env = {**__import__("os").environ, "PYTHONIOENCODING": "cp437"}  # cannot encode Cyrillic
+    env.pop("PYTHONUTF8", None)
+    proc = subprocess.run(
+        [sys.executable, "-m", "chrom_cli", "verify-clones", "--construct", str(COI_GB),
+         str(d), "-o", str(tmp_path / "o.csv")],
+        capture_output=True, cwd=ROOT, env=env)
+    assert proc.returncode in (0, 1), proc.stderr.decode("utf-8", "replace")
+    assert b"Traceback" not in proc.stderr
+    assert "Клон ж".encode() in proc.stdout  # utf-8 forced regardless of the console
+    assert "Ё!.ab1".encode() in proc.stderr
+
+
+def test_attached_console_uses_console_code_page(monkeypatch) -> None:
+    import builtins
+    import ctypes
+    import types
+
+    kernel32 = types.SimpleNamespace(AttachConsole=lambda pid: 1, GetConsoleOutputCP=lambda: 866,
+                                     SetConsoleOutputCP=lambda cp: pytest.fail("must not change"))
+    monkeypatch.setattr(ctypes, "windll", types.SimpleNamespace(kernel32=kernel32), raising=False)
+    opened = []
+    monkeypatch.setattr(builtins, "open", lambda *a, **k: opened.append((a, k)) or object())
+    monkeypatch.setattr(sys, "stdout", None)
+    monkeypatch.setattr(sys, "stderr", None)
+    chrom_cli._attach_console()
+    assert [a[0] for a, _ in opened] == ["CONOUT$", "CONOUT$"]
+    assert all(k["encoding"] == "cp866" and k["errors"] == "replace" for _, k in opened)
+
+
+def test_qc_without_stdout(monkeypatch, reads_dir: Path) -> None:
+    monkeypatch.setattr(sys, "stdout", None)
+    assert chrom_cli.main(["qc", str(reads_dir)]) == 0  # nowhere to print, must not crash
+
+
+@pytest.mark.parametrize("text, expected", [("1-10", (0, 10)), ("600-50", (599, 50))])
+def test_parse_region(text, expected) -> None:
+    assert chrom_cli._parse_region(text) == expected
+
+
+@pytest.mark.parametrize("text", ["abc", "5", "0-10", "-3-4", "1-2-3", ""])
+def test_parse_region_rejects(text) -> None:
+    with pytest.raises(chrom_cli.CliError):
+        chrom_cli._parse_region(text)
+
+
+def test_wrap_region_circular_ok_linear_rejected(reads_dir: Path, tmp_path: Path) -> None:
+    base = ["verify-clones", "--construct", str(COI_GB), "--region", "600-50", str(reads_dir)]
+    assert chrom_cli.main(base + ["--linear", "-o", str(tmp_path / "a.csv")]) == 2
+    ref = tmp_path / "circ.fasta"
+    ref.write_text(">c\n" + coi_reference() + "\n")  # FASTA defaults to circular
+    base[2] = str(ref)
+    assert chrom_cli.main(base + ["-o", str(tmp_path / "b.csv")]) in (0, 1)
+
+
+def test_bad_output_extension_rejected_before_verifying(reads_dir: Path, tmp_path: Path, monkeypatch) -> None:
+    import chrom_core.clones as clones
+    monkeypatch.setattr(clones, "verify_all", lambda *a, **k: pytest.fail("ran verify_all"))
+    assert chrom_cli.main(["verify-clones", "--construct", str(COI_GB), str(reads_dir),
+                           "-o", str(tmp_path / "r.txt")]) == 2
+
+
+@pytest.mark.parametrize("code_page", [0, 99999])
+def test_attached_console_unknown_code_page_falls_back_to_utf8(monkeypatch, code_page) -> None:
+    import builtins
+    import ctypes
+    import types
+
+    kernel32 = types.SimpleNamespace(AttachConsole=lambda pid: 1,
+                                     GetConsoleOutputCP=lambda: code_page)
+    monkeypatch.setattr(ctypes, "windll", types.SimpleNamespace(kernel32=kernel32), raising=False)
+    opened = []
+    monkeypatch.setattr(builtins, "open", lambda *a, **k: opened.append(k) or object())
+    monkeypatch.setattr(sys, "stdout", None)
+    monkeypatch.setattr(sys, "stderr", None)
+    chrom_cli._attach_console()
+    assert len(opened) == 2
+    assert all(k["encoding"] == "utf-8" and k["errors"] == "replace" for k in opened)
+
+
+def test_attached_console_is_all_or_nothing(monkeypatch) -> None:
+    import builtins
+    import ctypes
+    import types
+
+    kernel32 = types.SimpleNamespace(AttachConsole=lambda pid: 1, GetConsoleOutputCP=lambda: 866)
+    monkeypatch.setattr(ctypes, "windll", types.SimpleNamespace(kernel32=kernel32), raising=False)
+    calls = []
+
+    def fake_open(*a, **k):
+        calls.append(a)
+        if len(calls) == 2:
+            raise OSError("no console")
+        return types.SimpleNamespace(close=lambda: None)
+
+    monkeypatch.setattr(builtins, "open", fake_open)
+    monkeypatch.setattr(sys, "stdout", None)
+    monkeypatch.setattr(sys, "stderr", None)
+    chrom_cli._attach_console()
+    assert sys.stdout is None and sys.stderr is None
+
+
+def test_unusable_reads_reported_on_stderr(reads_dir: Path, tmp_path: Path, capsys) -> None:
+    good = chrom_cli.main(["verify-clones", "--construct", str(COI_GB), str(reads_dir),
+                           "-o", str(tmp_path / "a.csv")])
+    capsys.readouterr()
+    (reads_dir / "Achl_ACHLO006-09_3_F.ab1").write_bytes(b"not an ab1 file at all")
+    source = (DATA / "real" / READS[0]).read_bytes()
+    (reads_dir / "Achl_ACHLO006-09_4_F.ab1").write_bytes(source[:len(source) // 3])
+    out = tmp_path / "b.csv"
+    code = chrom_cli.main(["verify-clones", "--construct", str(COI_GB), str(reads_dir),
+                           "-o", str(out)])
+    assert code == good
+    err = capsys.readouterr().err.splitlines()
+    for name in ("Achl_ACHLO006-09_3_F.ab1", "Achl_ACHLO006-09_4_F.ab1"):
+        assert any(line.startswith(f"ab1kit: {name}: unreadable") for line in err), err
+    assert "Achl_ACHLO006-09_3_F.ab1: unreadable" in out.read_text(encoding="utf-8")
+
+
+def test_read_issue_wording() -> None:
+    from chrom_core.clone_report import read_issue
+    from chrom_core.clones import ReadRef, ReadResult
+
+    ref = ReadRef(Path("a.ab1"), "c", "F")
+    assert read_issue(ReadResult(ref, None, error="no_alignment")) == \
+        "did not align to the construct"
+    assert read_issue(ReadResult(ref, None, error="bad header")) == "unreadable (bad header)"
+
+
+def test_cli_difference_count_matches_report(reads_dir: Path, tmp_path: Path, capsys) -> None:
+    ref = tmp_path / "mutated.fasta"
+    seq = coi_reference()
+    alt = lambda b: "A" if b != "A" else "C"
+    seq = mutate(mutate(seq, 250, "sub", alt(seq[250])), 300, "sub", alt(seq[300]))
+    ref.write_text(">mut\n" + seq + "\n")
+    out = tmp_path / "rep.csv"
+    chrom_cli.main(["verify-clones", "--construct", str(ref), "--region", "7-280",
+                    "--linear", str(reads_dir), "-o", str(out)])
+    shown = capsys.readouterr().out
+    rows = [line.split(",") for line in out.read_text(encoding="utf-8").splitlines()[1:]]
+    assert rows
+    for row in rows:
+        line = next(l for l in shown.splitlines() if l.startswith(row[0] + " "))
+        assert line.rstrip().endswith(f"differences {row[4]}")

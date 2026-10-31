@@ -104,6 +104,27 @@ def test_ambiguous_repetitive_reference_flagged() -> None:
     assert a.identity == 1.0
 
 
+def test_homopolymer_indel_is_one_placement() -> None:
+    import random
+    rng = random.Random(5)
+    left = "".join(rng.choice("ACGT") for _ in range(80))
+    right = "".join(rng.choice("ACGT") for _ in range(80))
+    reference = left + "GTTTTC" + right
+    read = left + "GTTTTTC" + right          # one extra T in the run
+    a = align_read(read, reference)
+    assert a.alternatives > 1                 # co-optimal gap placements ...
+    assert a.placements == 1                  # ... but a single placement
+
+
+def test_distinct_repeat_copies_are_two_placements() -> None:
+    import random
+    rng = random.Random(6)
+    unit = "".join(rng.choice("ACGT") for _ in range(60))
+    spacer = "".join(rng.choice("ACGT") for _ in range(200))
+    a = align_read(unit, spacer[:50] + unit + spacer + unit + spacer[50:])
+    assert a.placements == 2
+
+
 def test_empty_inputs_raise(reference: str) -> None:
     with pytest.raises(ValueError):
         align_read("", reference)

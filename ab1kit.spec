@@ -1,15 +1,21 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller spec for the ab1kit one-file Windows executable.
+"""PyInstaller spec for the ab1kit one-file executable (Windows exe, Linux ELF).
 
 Build:  pyinstaller ab1kit.spec --noconfirm
 """
+
+import sys
 
 a = Analysis(
     ["chrom_cli.py"],
     pathex=[],
     binaries=[],
-    datas=[],
-    hiddenimports=["chrom_core", "ui", "i18n", "translations_en"],
+    datas=[
+        ("ui/style.qss", "ui"),
+        ("ui/style_dark.qss", "ui"),
+        ("ui/icons", "ui/icons"),
+    ],
+    hiddenimports=["chrom_core", "ui", "ui.read_view", "ui.construct", "ui.status", "ui.tables", "i18n", "translations_en"],
     hookspath=[],
     excludes=["tkinter", "matplotlib", "numpy.tests"],
     noarchive=False,
@@ -26,5 +32,8 @@ exe = EXE(
     debug=False,
     strip=False,
     upx=False,
+    # console=False only matters on Windows/macOS; a Linux ELF keeps stdout.
     console=False,
+    # .ico is a Windows/macOS-only option; PyInstaller does not use it on Linux.
+    icon="ui/icons/app/ab1kit.ico" if sys.platform == "win32" else None,
 )

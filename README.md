@@ -1,10 +1,11 @@
-# ab1kit
+# <img src="ui/icons/app/ab1kit.png" width="48" align="center"> ab1kit
 
 Open-source desktop tool for viewing, editing and analyzing Sanger sequencing
 chromatograms (`.ab1` files) — a free, offline alternative to FinchTV / Chromas
 for everyday molecular biology lab work. English/Russian interface.
 
 ![viewer](docs/screenshots/viewer.png)
+![construct check](docs/screenshots/construct.png)
 
 ## Features
 
@@ -48,6 +49,73 @@ for everyday molecular biology lab work. English/Russian interface.
 ![dark theme](docs/screenshots/viewer-dark.png)
 ![batch mode](docs/screenshots/batch.png)
 
+## Clone verification
+
+Check a set of plasmid or amplicon clones against the expected construct from
+their Sanger reads: open the clone-verification workspace, load the reference (FASTA,
+GenBank or SnapGene), drop the `.ab1` reads of the whole plate, optionally set
+the region of interest, and read the verdict per clone off the colour matrix.
+
+![clone verification](docs/screenshots/construct.png)
+
+**Scenario.** Load the construct, add the reads (files or a folder), check the
+automatic grouping into clones, choose the region; every clone gets its verdict right away. Click a
+difference in the matrix to see the stacked chromatograms of every read at that
+position. Export the result as Excel/CSV, or save the whole session as an
+`.ab1proj` file. FASTA constructs are treated as circular (reads may span the
+origin); GenBank/SnapGene files take the topology from the file; the *Circular*
+checkbox (`--linear` on the command line) overrides the topology.
+
+**File names.** Reads are grouped by name as `<clone>_<primer>`: the primer is
+the last known primer token (`F`, `R`, `T7`, `SP6`, `M13F`, `pUC-F`, ...); if
+the name has none, the last token is taken as the primer. The clone is what
+precedes the primer, minus a single-digit order token and a leading plate well
+(`A05`), the well being stripped only when another clone token follows it
+(`B2_F` is clone `B2`). `A05_clone3_2_R.ab1` is clone `clone3`, primer `R`;
+`Achl_ACHLO006-09_1_F.ab1` is clone `Achl_ACHLO006-09`. Files whose name yields
+no clone stay unassigned and are skipped. For other conventions give a regular
+expression with named groups `clone` and `primer` that matches the whole file
+name without the extension, e.g. `(?P<clone>\d+)-(?P<primer>[A-Za-z0-9]+)`.
+
+**Verdicts.** Checked in this order, the first match wins:
+
+| Verdict | Meaning |
+| --- | --- |
+| `no_data` (grey) | no read of the clone aligned to the construct |
+| `mixed` (purple) | at least 3 positions (default) with a double peak: probably a mixed colony |
+| `errors` (red) | at least one difference in the region that is confirmed or disputed |
+| `incomplete` (yellow) | no such difference, but part of the region is not covered by any read |
+| `ok` (green) | the region is fully covered and shows no reliable difference |
+
+A difference is *confirmed* (only supporting reads, Q >= min Q), *disputed*
+(another read shows the reference there) or *low quality* (seen only below
+min Q). Both confirmed and disputed differences give `errors`; only low-quality
+ones do not change the verdict. Defaults: min Q 20, double-peak ratio 0.40.
+
+**Command line** (no GUI, no Qt needed):
+
+```
+ab1kit verify-clones --construct pET28-gene.gb --region 120-1850 reads/ -o report.xlsx
+ab1kit qc reads/ -o qc.csv
+ab1kit export reads/ --trim --fasta -o trimmed/
+```
+
+`verify-clones` prints a table of clones and exits with 0 if at least one clone
+is `ok`, 1 if none is, 2 on invalid input; `-o report.csv` writes `report.csv`
+and `report_differences.csv`. The `differences` count (table and report) is the
+in-region differences that are not low quality, i.e. those behind `errors`.
+Reads that could not be used (unreadable, not aligned, ambiguous placement) are
+listed on stderr as `ab1kit: <file>: <reason>` and in the `read_issues` column. Options: `--region A-B` (1-based, inclusive),
+`--linear`, `--pattern REGEX`, `--min-q N`, `--het-ratio X`.
+
+The exit-code contract applies to the `ab1kit` command installed with pip. The
+Windows release `ab1kit.exe` is a windowed program: the shell returns to the
+prompt immediately, so exit codes and output ordering are unreliable and output
+may appear after the prompt. Wait for it explicitly: `start /wait ab1kit.exe
+verify-clones ...` (cmd), or `Start-Process -Wait -NoNewWindow` /
+`(Start-Process ab1kit.exe -ArgumentList ... -Wait -PassThru).ExitCode`
+(PowerShell).
+
 ## Getting started
 
 Requires Python 3.11+:
@@ -56,12 +124,20 @@ Requires Python 3.11+:
 python -m venv .venv
 .venv/Scripts/pip install -e ".[dev]"    # Windows; on POSIX: .venv/bin/pip
 .venv/Scripts/python -m pytest           # run the test suite
+.venv/Scripts/python -m pytest -m perf   # timing tests (skipped by default)
 .venv/Scripts/ab1kit                     # launch the GUI
 ```
 
-`ab1kit` also accepts a file or folder argument. On Windows, a prebuilt
-executable is available on the [Releases](https://github.com/adrobi/ab1kit/releases)
-page.
+`ab1kit` also accepts a file or folder argument. Prebuilt binaries are on the
+[Releases](https://github.com/adrobi/ab1kit/releases) page:
+
+- **Windows:** `ab1kit.exe` (single file, no installation).
+- **Linux (x86_64):** `ab1kit-linux-x86_64.tar.gz`. Unpack with
+  `tar -xzf ab1kit-linux-x86_64.tar.gz` and run `./ab1kit`. Built on Ubuntu
+  22.04, so it needs glibc 2.35 or newer. The GUI needs the usual Qt runtime
+  libraries; on Debian/Ubuntu:
+  `sudo apt install libegl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xinerama0 libxcb-xfixes0 libgl1 libfontconfig1 libdbus-1-3 libglib2.0-0 libxcb-xkb1 libxcb-xinput0 libxcb-shm0`.
+  The Linux binary prints CLI output to the terminal normally.
 
 ## Keyboard shortcuts
 
@@ -96,5 +172,6 @@ Example chromatograms in `examples/` come from the
 
 ## Status
 
-v1.0.0 — viewer, editing, trimming, batch mode, alignment, SNP calling and
-expected-SNP verification are all implemented. See [CHANGELOG.md](CHANGELOG.md).
+v1.1.0 — adds clone verification, a command-line interface, a refreshed UI
+and more accurate peak analysis on top of the 1.0 viewer, editing, batch mode,
+alignment, SNP calling and expected-SNP verification. See [CHANGELOG.md](CHANGELOG.md).

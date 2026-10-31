@@ -1,0 +1,78 @@
+LOCUS       HM417896                 658 bp    DNA     linear   INV 25-JUL-2016
+DEFINITION  Allolobophora chlorotica voucher AC2 cytochrome oxidase subunit 1
+            (COI) gene, partial cds; mitochondrial.
+ACCESSION   HM417896
+VERSION     HM417896.1
+DBLINK      BioProject: PRJNA37833
+KEYWORDS    BARCODE.
+SOURCE      mitochondrion Allolobophora chlorotica
+  ORGANISM  Allolobophora chlorotica
+            Eukaryota; Metazoa; Spiralia; Lophotrochozoa; Annelida; Clitellata;
+            Oligochaeta; Crassiclitellata; Lumbricina; Lumbricidae;
+            Lumbricinae; Allolobophora.
+REFERENCE   1  (bases 1 to 658)
+  AUTHORS   Dupont,L., Lazrek,F., Porco,D., King,R.A., Rougerie,R.,
+            Symondson,W.O.C., Livet,A., Richard,B., Decaens,T., Butt,K. and
+            Mathieu,J.
+  TITLE     New insight into the genetic structure of the Allolobophora
+            chlorotica aggregate in Europe using microsatellite and
+            mitochondrial data
+  JOURNAL   Pedobiologia (Jena) (2011) In press
+REFERENCE   2  (bases 1 to 658)
+  CONSRTM   International Barcode of Life (iBOL)
+  TITLE     iBOL Data Release
+  JOURNAL   Unpublished
+REFERENCE   3  (bases 1 to 658)
+  CONSRTM   International Barcode of Life (iBOL)
+  TITLE     Direct Submission
+  JOURNAL   Submitted (01-JUN-2010) Biodiversity Institute of Ontario,
+            University of Guelph, 50 Stone Rd West, Guelph, Ontario N1G2W1,
+            Canada
+COMMENT     ##International Barcode of Life (iBOL)Data-START##
+            Barcode Index Number :: BOLD:AAA2170
+            Order Assignment     :: Haplotaxida
+            iBOL Working Group   :: iBOL:WG1.9
+            iBOL Release Status  :: Phase 2
+            ##International Barcode of Life (iBOL)Data-END##
+FEATURES             Location/Qualifiers
+     source          1..658
+                     /organism="Allolobophora chlorotica"
+                     /organelle="mitochondrion"
+                     /mol_type="genomic DNA"
+                     /specimen_voucher="AC2"
+                     /db_xref="BOLD:ACHLO007-09.COI-5P"
+                     /db_xref="taxon:302034"
+                     /geo_loc_name="France: Seine-et-Marne, Ile de France,
+                     Chaumes en brie (77390) -Maurevert"
+                     /lat_lon="49.1458 N 4.43806 E"
+                     /collection_date="29-Mar-2009"
+                     /PCR_primers="fwd_seq:
+                     tgtaaaacgacggccagtggtcaacaaatcataaagatattgg, rev_seq:
+                     caggaaacagctatgactaaacttcagggtgaccaaaaaatca"
+     gene            <1..>658
+                     /gene="COI"
+     CDS             <1..>658
+                     /gene="COI"
+                     /codon_start=2
+                     /transl_table=5
+                     /product="cytochrome oxidase subunit 1"
+                     /protein_id="ADK40636.1"
+                     /translation="TLYFILGVWAGMVGAGMSLLIRIELSQPGAFLGSDQLYNTIVTA
+                     HAFVMIFFLVMPVFIGGFGNWLLPLMLGAPDMAFPRLNNMSFWLLPPSLILLVSSAAV
+                     EKGAGTGWTVYPPLASNLAHAGPSVDLAIFSLHLAGASSILGAINFITTVINMRWSGL
+                     RLERIPLFVWAVLITVVLLLLSLPVLAGAITMLLTDRNLNTSFFDPAGGGDPILYQHL
+                     F"
+ORIGIN      
+        1 aactttatat tttattctgg gcgtctgagc aggaatggtt ggagccggta taagacttct
+       61 aattcgaatc gagctaagac aaccaggagc gttcctgggc agagaccaac tatacaatac
+      121 tatcgttact gcacacgcat ttgtaataat cttctttcta gtaatgcctg tattcatcgg
+      181 gggattcgga aactggcttt tacctttaat acttggagcc cccgatatag cattccctcg
+      241 actcaacaac atgagattct gactacttcc cccatcactg atccttttag tgtcctctgc
+      301 ggcggtagaa aaaggcgctg gtacggggtg aactgtttat ccgcctctag caagaaatct
+      361 tgcccacgca ggcccgtctg tagatttagc catcttttcc cttcatttag cgggtgcgtc
+      421 ttctattcta ggggctatta attttatcac cacagttatt aatatgcgtt gaagaggatt
+      481 acgtcttgaa cgaattcccc tgtttgtctg agctgtgcta attacagttg ttcttctact
+      541 tctatcttta ccagtgctag caggtgccat taccatactt cttaccgacc gaaacctcaa
+      601 tacttcattc tttgatcctg ccggtggtgg agaccccatc ctctaccaac acttattc
+//
+

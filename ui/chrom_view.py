@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QRubberBand, QToolTip, QWidget
 
 from chrom_core import Chromatogram
 from i18n import tr
+from ui.status import quality_bucket
 from ui.theme import LIGHT
 
 MIN_ZOOM = 0.02
@@ -525,7 +526,7 @@ class ChromatogramWidget(QWidget):
                 prev_peak = peak
                 continue
             prev_peak = peak
-            bucket = "low_q" if q < 10 else "mid_q" if q < 20 else "high_q"
+            bucket = quality_bucket(q)
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(QColor(self.theme[bucket]))
             bar_h = int((Q_STRIP_H - 6) * q / max_q)
