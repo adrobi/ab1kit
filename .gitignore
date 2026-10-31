@@ -12,3 +12,7 @@ dist/
 .DS_Store
 *.ab1kit.json
 /PLAN.md
+
+# Local working notes, not published
+concept.ru.md
+docs/superpowers/
